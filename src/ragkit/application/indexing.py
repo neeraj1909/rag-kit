@@ -1,0 +1,342 @@
+"""Source-to-index application orchestration."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from time import perf_counter_ns
+
+from ragkit.domain import (
+    BoxLocator,
+    CellLocator,
+    Chunk,
+    Document,
+    ExtractionProvenance,
+    IndexCompatibilityError,
+    IndexManifest,
+    IntegrityError,
+    InvalidDomainValueError,
+    KeyframeLocator,
+    PageLocator,
+    SourceLocator,
+    TextSpanLocator,
+    TimeSpanLocator,
+)
+from ragkit.ports import (
+    AcquiredAsset,
+    Chunker,
+    ChunkingRequest,
+    DocumentExtractor,
+    DocumentProjector,
+    Embedder,
+    EmbeddingRequest,
+    ExtractionRequest,
+    FamilyClassifier,
+    ProjectionRequest,
+    SourceConnector,
+    SourceRequest,
+    Telemetry,
+    UpsertRequest,
+    VectorStore,
+)
+
+from ._telemetry import PipelineDiagnostic, StageTiming, invoke_timed
+
+
+def _positive(value: int, label: str) -> None:
+    if value <= 0:
+        raise InvalidDomainValueError(f"{label} must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class IndexingRequest:
+    """One bounded indexing invocation under an explicit immutable manifest."""
+
+    source_uri: str
+    manifest: IndexManifest
+    max_assets: int = 32
+    max_bytes_per_asset: int = 50_000_000
+    max_documents: int = 32
+    max_parts_per_document: int = 10_000
+    max_chunks: int = 100_000
+
+    def __post_init__(self) -> None:
+        if not self.source_uri.strip():
+            raise InvalidDomainValueError("source_uri must not be empty")
+        _positive(self.max_assets, "max_assets")
+        _positive(self.max_bytes_per_asset, "max_bytes_per_asset")
+        _positive(self.max_documents, "max_documents")
+        _positive(self.max_parts_per_document, "max_parts_per_document")
+        _positive(self.max_chunks, "max_chunks")
+
+
+@dataclass(frozen=True, slots=True)
+class IndexingResult:
+    """Observable indexing outcome without source content or provider details."""
+
+    manifest: IndexManifest
+    asset_count: int
+    document_count: int
+    chunk_count: int
+    diagnostics: tuple[PipelineDiagnostic, ...]
+    timings: tuple[StageTiming, ...]
+
+
+class IndexingService:
+    """Coordinate injected indexing capabilities in one stable order."""
+
+    def __init__(
+        self,
+        connector: SourceConnector,
+        classifier: FamilyClassifier,
+        extractor: DocumentExtractor,
+        projector: DocumentProjector,
+        chunker: Chunker,
+        embedder: Embedder,
+        vector_store: VectorStore,
+        telemetry: Telemetry,
+        *,
+        clock: Callable[[], int] = perf_counter_ns,
+    ) -> None:
+        self._connector = connector
+        self._classifier = classifier
+        self._extractor = extractor
+        self._projector = projector
+        self._chunker = chunker
+        self._embedder = embedder
+        self._vector_store = vector_store
+        self._telemetry = telemetry
+        self._clock = clock
+
+    def run(self, request: IndexingRequest) -> IndexingResult:
+        """Acquire, classify, extract, project, chunk, embed, then upsert."""
+
+        self._require_manifest_components(request.manifest)
+        timings: list[StageTiming] = []
+        assets = invoke_timed(
+            "index.fetch",
+            lambda: self._connector.fetch(
+                SourceRequest(request.source_uri, request.max_assets, request.max_bytes_per_asset)
+            ),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        if not assets:
+            return self._omitted(request.manifest, 0, 0, "acquisition", "no_assets", timings)
+
+        classifications = invoke_timed(
+            "index.classify",
+            lambda: self._classifier.classify(assets),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        asset_ids = tuple(asset.reference.asset_id for asset in assets)
+        classified_ids = tuple(item.asset_id for item in classifications)
+        if classified_ids != asset_ids:
+            raise IntegrityError("classification output must align exactly with acquired assets")
+
+        documents = invoke_timed(
+            "index.extract",
+            lambda: self._extractor.extract(
+                ExtractionRequest(assets, classifications, request.max_documents)
+            ),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        if not documents:
+            return self._omitted(
+                request.manifest,
+                len(assets),
+                0,
+                "extraction",
+                "no_documents",
+                timings,
+            )
+        self._require_acquired_assets(assets, documents)
+
+        projected = invoke_timed(
+            "index.project",
+            lambda: self._projector.project(
+                ProjectionRequest(documents, request.max_parts_per_document)
+            ),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        self._require_preserved_projection(documents, projected)
+
+        chunks = invoke_timed(
+            "index.chunk",
+            lambda: self._chunker.chunk(ChunkingRequest(projected, request.max_chunks)),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        if not chunks:
+            return self._omitted(
+                request.manifest,
+                len(assets),
+                len(projected),
+                "chunking",
+                "no_chunks",
+                timings,
+            )
+        self._require_resolved_chunks(projected, chunks)
+
+        embeddings = invoke_timed(
+            "index.embed",
+            lambda: self._embedder.embed_documents(
+                EmbeddingRequest(tuple(chunk.text for chunk in chunks))
+            ),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        upsert = UpsertRequest(chunks, embeddings, request.manifest)
+        invoke_timed(
+            "index.upsert",
+            lambda: self._vector_store.upsert(upsert),
+            self._telemetry,
+            self._clock,
+            timings,
+        )
+        return IndexingResult(
+            request.manifest,
+            len(assets),
+            len(projected),
+            len(chunks),
+            (),
+            tuple(timings),
+        )
+
+    def _require_manifest_components(self, manifest: IndexManifest) -> None:
+        differences: dict[str, tuple[object, object]] = {}
+        if manifest.chunker_fingerprint != self._chunker.fingerprint:
+            differences["chunker_fingerprint"] = (
+                manifest.chunker_fingerprint,
+                self._chunker.fingerprint,
+            )
+        if manifest.embedder_fingerprint != self._embedder.fingerprint:
+            differences["embedder_fingerprint"] = (
+                manifest.embedder_fingerprint,
+                self._embedder.fingerprint,
+            )
+        if manifest.embedding_dimension != self._embedder.dimension:
+            differences["embedding_dimension"] = (
+                manifest.embedding_dimension,
+                self._embedder.dimension,
+            )
+        if differences:
+            raise IndexCompatibilityError(differences)
+
+    @staticmethod
+    def _require_acquired_assets(
+        assets: tuple[AcquiredAsset, ...], documents: tuple[Document, ...]
+    ) -> None:
+        acquired_references = {item.reference for item in assets}
+        if any(
+            asset not in acquired_references for document in documents for asset in document.assets
+        ):
+            raise IntegrityError("extracted documents must retain exact acquired asset references")
+
+    @staticmethod
+    def _require_preserved_projection(
+        documents: tuple[Document, ...], projected: tuple[Document, ...]
+    ) -> None:
+        if tuple(item.document_id for item in projected) != tuple(
+            item.document_id for item in documents
+        ):
+            raise IntegrityError("projection output must preserve document identity and order")
+        for original, result in zip(documents, projected, strict=True):
+            projected_parts = {part.part_id: part for part in result.parts}
+            if any(
+                part.part_id not in projected_parts
+                or projected_parts[part.part_id].provenance != part.provenance
+                for part in original.parts
+            ):
+                raise IntegrityError("projection must preserve every original part provenance")
+
+    @staticmethod
+    def _require_resolved_chunks(
+        documents: tuple[Document, ...], chunks: tuple[Chunk, ...]
+    ) -> None:
+        documents_by_id = {document.document_id: document for document in documents}
+        for chunk in chunks:
+            document = documents_by_id.get(chunk.document_id)
+            if document is None:
+                raise IntegrityError("chunk must resolve to a projected document")
+            parts_by_id = {part.part_id: part for part in document.parts}
+            if any(
+                part_id not in parts_by_id
+                or not IndexingService._provenance_resolves(
+                    parts_by_id[part_id].provenance, provenance
+                )
+                for part_id, provenance in zip(chunk.source_part_ids, chunk.provenance, strict=True)
+            ):
+                raise IntegrityError("chunk source part provenance must resolve exactly")
+
+    @staticmethod
+    def _provenance_resolves(source: ExtractionProvenance, derived: ExtractionProvenance) -> bool:
+        if replace(derived, locator=source.locator) != source:
+            return False
+        return IndexingService._locator_is_within(source.locator, derived.locator)
+
+    @staticmethod
+    def _locator_is_within(source: SourceLocator, derived: SourceLocator) -> bool:
+        if derived == source:
+            return True
+        if isinstance(source, TextSpanLocator) and isinstance(derived, TextSpanLocator):
+            return source.start <= derived.start and derived.end <= source.end
+        if isinstance(source, PageLocator):
+            if isinstance(derived, PageLocator):
+                return derived.page == source.page
+            return isinstance(derived, BoxLocator) and derived.page == source.page
+        if isinstance(source, BoxLocator) and isinstance(derived, BoxLocator):
+            return (
+                derived.page == source.page
+                and source.x0 <= derived.x0 < derived.x1 <= source.x1
+                and source.y0 <= derived.y0 < derived.y1 <= source.y1
+            )
+        if isinstance(source, CellLocator) and isinstance(derived, CellLocator):
+            source_end_row = source.end_row
+            source_end_column = source.end_column
+            derived_end_row = derived.end_row
+            derived_end_column = derived.end_column
+            if (
+                source_end_row is None
+                or source_end_column is None
+                or derived_end_row is None
+                or derived_end_column is None
+            ):
+                return False
+            return (
+                derived.sheet == source.sheet
+                and source.start_row <= derived.start_row
+                and derived_end_row <= source_end_row
+                and source.start_column <= derived.start_column
+                and derived_end_column <= source_end_column
+            )
+        if isinstance(source, TimeSpanLocator) and isinstance(derived, TimeSpanLocator):
+            return source.start_ms <= derived.start_ms and derived.end_ms <= source.end_ms
+        return isinstance(source, KeyframeLocator) and derived == source
+
+    @staticmethod
+    def _omitted(
+        manifest: IndexManifest,
+        asset_count: int,
+        document_count: int,
+        stage: str,
+        code: str,
+        timings: list[StageTiming],
+    ) -> IndexingResult:
+        return IndexingResult(
+            manifest,
+            asset_count,
+            document_count,
+            0,
+            (PipelineDiagnostic(stage, code, f"{stage} produced no indexable output"),),
+            tuple(timings),
+        )

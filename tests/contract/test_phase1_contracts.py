@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from math import isfinite
 
 import pytest
 
 from conftest import ContractCorpus
+from contract_assertions import (
+    assert_embedding_alignment,
+    assert_exact_provenance_preserved,
+    assert_ranked_results,
+    assert_unsupported_is_explicit,
+)
 from fakes import (
     BrokenEmbedder,
     BrokenProjector,
@@ -32,11 +37,9 @@ from ragkit.domain import (
     CellLocator,
     Comparison,
     ComparisonOperator,
-    Document,
     ExtractionProvenance,
     IndexCompatibilityError,
     PageLocator,
-    ScoredChunk,
     TextContent,
     TextSpanLocator,
     UnsupportedCapabilityError,
@@ -44,13 +47,11 @@ from ragkit.domain import (
 from ragkit.ports import (
     AcquiredAsset,
     DeleteRequest,
-    Embedder,
     EmbeddingRequest,
     EvaluationCase,
     EvaluationExample,
     EvaluationRequest,
     ExtractionRequest,
-    FamilyClassifier,
     GenerationRequest,
     ProjectionRequest,
     PromptRequest,
@@ -64,47 +65,6 @@ from ragkit.ports import (
 )
 
 pytestmark = pytest.mark.contract
-
-
-def assert_exact_provenance_preserved(before: Document, after: Document) -> None:
-    """Reusable projector contract: part identity maps to identical evidence."""
-    before_parts = {item.part_id: item.provenance for item in before.parts}
-    after_parts = {item.part_id: item.provenance for item in after.parts}
-    assert before_parts.items() <= after_parts.items()
-
-
-def assert_embedding_alignment(embedder: Embedder, texts: tuple[str, ...]) -> None:
-    """Reusable embedder contract: count, order, width and determinism align."""
-    first = embedder.embed_documents(EmbeddingRequest(texts))
-    second = embedder.embed_documents(EmbeddingRequest(texts))
-    assert first == second
-    assert len(first.embeddings) == len(texts)
-    assert all(item.dimension == embedder.dimension for item in first.embeddings)
-    assert first.embeddings == tuple(embedder.embed_query(text) for text in texts)
-
-
-def assert_ranked_results(results: tuple[ScoredChunk, ...], *, top_k: int) -> None:
-    """Reusable retrieval contract: finite, unique, bounded, canonical ordering."""
-    assert len(results) <= top_k
-    chunks = [item.chunk for item in results]
-    assert len({item.chunk_id for item in chunks}) == len(chunks)
-    expected = sorted(
-        results,
-        key=lambda item: (-item.score.relevance, str(item.chunk.chunk_id)),
-    )
-    assert list(results) == expected
-    assert [item.rank for item in results] == list(range(1, len(results) + 1))
-    assert all(isfinite(item.score.relevance) for item in results)
-    assert all(item.chunk.provenance for item in results)
-
-
-def assert_unsupported_is_explicit(classifier: FamilyClassifier, asset: AcquiredAsset) -> None:
-    """Reusable classifier contract: never silently omit an unsupported asset."""
-    try:
-        classifier.classify((asset,))
-    except UnsupportedCapabilityError:
-        return
-    raise AssertionError("unsupported input was silently accepted or omitted")
 
 
 def test_connector_classifier_and_extractor_are_deterministic_and_aligned(

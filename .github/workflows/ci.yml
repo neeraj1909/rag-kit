@@ -42,5 +42,9 @@ jobs:
         run: timeout 60 uv run pytest -m unit --no-cov
       - name: Contract tests
         run: timeout 60 uv run pytest -m contract --no-cov
+      - name: Integration tests
+        run: timeout 60 uv run pytest -m integration --no-cov
+      - name: End-to-end tests
+        run: timeout 60 uv run pytest -m e2e --no-cov
       - name: Coverage
-        run: uv run pytest -m "unit or contract" --cov=ragkit --cov-report=term-missing
+        run: uv run pytest --cov=ragkit --cov-report=term-missing

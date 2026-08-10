@@ -25,7 +25,9 @@ uv run python -c "import ragkit"
 uv run python scripts/check_imports.py
 timeout 60 uv run pytest -m unit --no-cov
 timeout 60 uv run pytest -m contract --no-cov
-uv run pytest -m "unit or contract" --cov=ragkit --cov-report=term-missing
+timeout 60 uv run pytest -m integration --no-cov
+timeout 60 uv run pytest -m e2e --no-cov
+uv run pytest --cov=ragkit --cov-report=term-missing
 ```
 
 During implementation, apply automatic formatting and safe lint fixes with:

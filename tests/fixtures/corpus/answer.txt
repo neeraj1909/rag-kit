@@ -1,0 +1,1 @@
+The fixture answer is Cobalt Observatory, a deterministic offline research site.

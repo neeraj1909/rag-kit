@@ -20,6 +20,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+ragkit = "ragkit.cli.main:main"
+
 [project.optional-dependencies]
 text = []
 ocr = [
