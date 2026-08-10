@@ -29,6 +29,8 @@ from ragkit.ports import (
     PromptRequest,
     Reranker,
     RerankRequest,
+    RetrievalRequest,
+    Retriever,
     SourceConnector,
     SourceRequest,
     Telemetry,
@@ -155,6 +157,17 @@ def assert_vector_store_contract(
     second = store.search(search)
     assert first == second
     assert_ranked_results(first, top_k=search.top_k)
+    return first
+
+
+def assert_retriever_contract(
+    retriever: Retriever, request: RetrievalRequest
+) -> tuple[ScoredChunk, ...]:
+    """Retrieval is deterministic, bounded, unique, canonical, and provenance complete."""
+
+    first = retriever.retrieve(request)
+    assert first == retriever.retrieve(request)
+    assert_ranked_results(first, top_k=request.top_k)
     return first
 
 

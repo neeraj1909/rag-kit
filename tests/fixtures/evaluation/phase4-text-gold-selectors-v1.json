@@ -1,0 +1,29 @@
+{
+  "schema_version": "ragkit-independent-gold-selectors/v1",
+  "cases": [
+    {
+      "case_id": "text-fixture-answer",
+      "source_uri": "tests/fixtures/corpus/answer.txt",
+      "source_sha256": "c4ce517d41a98a113a66375adb91250e78aa5568c6f9b2ba479aad213ba5b6f8",
+      "exact_chunk_text": "The fixture answer is Cobalt Observatory, a deterministic offline research site.",
+      "locator": {"kind": "text_span", "start": 0, "end": 80},
+      "relevant_evidence_id": "text:fixture-answer"
+    },
+    {
+      "case_id": "text-offline-operation",
+      "source_uri": "tests/fixtures/corpus/guide.md",
+      "source_sha256": "073d480487e958dbe05915a6de905d23571bc730f09c4b669208ee06bf3575b4",
+      "exact_chunk_text": "Use the offline profile when network access and model downloads are forbidden.",
+      "locator": {"kind": "text_span", "start": 20, "end": 98},
+      "relevant_evidence_id": "text:offline-operation"
+    },
+    {
+      "case_id": "text-evidence-policy",
+      "source_uri": "tests/fixtures/corpus/policy.html",
+      "source_sha256": "fcd901d243c6c83d70426b3c188edca1c8fc1923941eb3223d3377a5a14a997d",
+      "exact_chunk_text": "Every answer must cite its source span.",
+      "locator": {"kind": "text_span", "start": 55, "end": 94},
+      "relevant_evidence_id": "text:evidence-policy"
+    }
+  ]
+}

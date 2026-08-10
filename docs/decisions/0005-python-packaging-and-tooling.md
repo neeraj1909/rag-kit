@@ -19,7 +19,7 @@ interpreter during take-home assignments.
   MIT as the repository license.
 - Keep `project.dependencies` empty in Phase 0. Publish independently selectable
   extras named `text`, `ocr`, `layout`, `vision`, `media`, `persistent`, and
-  `hosted`; keep test/lint/type/build tooling in the local `dev` dependency
+  `hosted`, and `reranking`; keep test/lint/type/build tooling in the local `dev` dependency
   group.
 - Use uv 0.9.22 for the initial resolution workflow and commit the universal
   `uv.lock`. The lockfile, not version prose, owns exact Python package

@@ -2,7 +2,7 @@
 
 from ._telemetry import PipelineDiagnostic, StageTiming
 from .answering import AnswerCitation, AnsweringRequest, AnsweringResult, AnsweringService
-from .indexing import IndexingRequest, IndexingResult, IndexingService
+from .indexing import IndexedEvidence, IndexingRequest, IndexingResult, IndexingService
 from .pipelines import RagPipeline
 
 __all__ = [
@@ -10,6 +10,7 @@ __all__ = [
     "AnsweringRequest",
     "AnsweringResult",
     "AnsweringService",
+    "IndexedEvidence",
     "IndexingRequest",
     "IndexingResult",
     "IndexingService",

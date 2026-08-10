@@ -166,7 +166,9 @@ def test_vector_store_is_idempotent_manifest_aware_and_canonical(
 def test_retrieval_reranking_prompt_generation_evaluation_and_telemetry(
     contract_corpus: ContractCorpus,
 ) -> None:
-    retrieved = FakeRetriever(contract_corpus.scored).retrieve(RetrievalRequest("alpha", 4))
+    retrieved = FakeRetriever(contract_corpus.scored).retrieve(
+        RetrievalRequest("alpha", 4, contract_corpus.manifest)
+    )
     assert_ranked_results(retrieved, top_k=4)
     reranked = FakeReranker().rerank(RerankRequest("alpha", tuple(reversed(retrieved)), 3))
     assert_ranked_results(reranked, top_k=3)
@@ -193,7 +195,9 @@ def test_retrieval_reranking_prompt_generation_evaluation_and_telemetry(
     assert telemetry.events == [event]
 
 
-def test_unsupported_capabilities_are_typed_and_never_silently_omitted() -> None:
+def test_unsupported_capabilities_are_typed_and_never_silently_omitted(
+    contract_corpus: ContractCorpus,
+) -> None:
     unsupported = AcquiredAsset(
         AssetRef("asset-image", "image/png", "b" * 64),
         b"image",
@@ -204,6 +208,7 @@ def test_unsupported_capabilities_are_typed_and_never_silently_omitted() -> None
             RetrievalRequest(
                 "query",
                 1,
+                contract_corpus.manifest,
                 Comparison("department", ComparisonOperator.EQ, "support"),
             )
         )
@@ -237,7 +242,9 @@ def test_deliberately_broken_fakes_prove_contract_checks_have_teeth(
     bad_results = (contract_corpus.scored[-1], contract_corpus.scored[0])
     with pytest.raises(AssertionError):
         assert_ranked_results(
-            BrokenRetriever(bad_results).retrieve(RetrievalRequest("query", 2)),
+            BrokenRetriever(bad_results).retrieve(
+                RetrievalRequest("query", 2, contract_corpus.manifest)
+            ),
             top_k=2,
         )
 

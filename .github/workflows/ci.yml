@@ -55,7 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-        extra: [ocr, layout, vision, media, persistent, hosted]
+        extra: [ocr, layout, vision, media, persistent, hosted, reranking]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -84,3 +84,17 @@ jobs:
         run: uv sync --frozen --group dev --all-extras
       - name: Coverage without implicit model downloads
         run: timeout 300 uv run pytest --cov=ragkit --cov-report=term-missing
+      - name: Fixed-corpus benchmark (latency informational)
+        run: |
+          timeout 120 uv run python scripts/benchmark.py \
+            --config configs/offline.toml \
+            --source tests/fixtures/corpus \
+            --query "What is the fixture answer?" \
+            --warmups 1 --repetitions 3 \
+            --output reports/benchmarks/ci-offline-text.json
+          uv run python -c "from pathlib import Path; from ragkit.evaluation.benchmark import BenchmarkResult; BenchmarkResult.from_json(Path('reports/benchmarks/ci-offline-text.json').read_text())"
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-benchmark-python-3.12
+          path: reports/benchmarks/ci-offline-text.json

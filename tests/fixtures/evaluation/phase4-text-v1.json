@@ -1,0 +1,42 @@
+{
+  "schema_version": "ragkit-evaluation-dataset/v1",
+  "dataset_id": "ragkit-phase4-text-gold-v1",
+  "cases": [
+    {
+      "case_id": "text-fixture-answer",
+      "family": "text",
+      "business_use_case": "A support agent retrieves the approved fixture answer.",
+      "source_uri": "tests/fixtures/corpus/answer.txt",
+      "query": "What is the fixture answer?",
+      "relevant_evidence_ids": ["text:fixture-answer"],
+      "expected_extractions": 1,
+      "required_locator_kinds": ["text_span"],
+      "eligibility": "eligible",
+      "ineligible_reason": null
+    },
+    {
+      "case_id": "text-offline-operation",
+      "family": "text",
+      "business_use_case": "An operator finds the approved no-network execution guidance.",
+      "source_uri": "tests/fixtures/corpus/guide.md",
+      "query": "Which profile should be used when model downloads are forbidden?",
+      "relevant_evidence_ids": ["text:offline-operation"],
+      "expected_extractions": 1,
+      "required_locator_kinds": ["text_span"],
+      "eligibility": "eligible",
+      "ineligible_reason": null
+    },
+    {
+      "case_id": "text-evidence-policy",
+      "family": "text",
+      "business_use_case": "A reviewer retrieves the citation policy before approving an answer.",
+      "source_uri": "tests/fixtures/corpus/policy.html",
+      "query": "What must every answer cite?",
+      "relevant_evidence_ids": ["text:evidence-policy"],
+      "expected_extractions": 1,
+      "required_locator_kinds": ["text_span"],
+      "eligibility": "eligible",
+      "ineligible_reason": null
+    }
+  ]
+}

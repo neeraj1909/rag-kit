@@ -2,6 +2,11 @@
 
 from .chroma_store import ChromaVectorStore
 from .classification import DeclaredFamilyClassifier
+from .cross_encoder_reranker import (
+    DEFAULT_RERANKER_MODEL_ID,
+    DEFAULT_RERANKER_MODEL_REVISION,
+    LocalCrossEncoderReranker,
+)
 from .filesystem import FilesystemSourceConnector
 from .generation import DeterministicEvaluator, ExtractiveGenerator, TemplatePromptBuilder
 from .hosted import OpenAIHostedGenerator
@@ -11,7 +16,15 @@ from .mixed import MixedImageDocumentExtractor
 from .multimodal import EvidenceChunker
 from .observability import InMemoryTelemetry
 from .ocr import OcrDocumentExtractor
-from .retrieval import HashingEmbedder, InMemoryVectorStore, NoOpReranker
+from .retrieval import (
+    BM25Config,
+    BM25Retriever,
+    DenseRetriever,
+    HashingEmbedder,
+    HybridRetriever,
+    InMemoryVectorStore,
+    NoOpReranker,
+)
 from .textual import (
     NoOpDocumentProjector,
     StructureAwareChunker,
@@ -22,16 +35,23 @@ from .torch_embedder import TorchTextEmbedder
 from .vision import LocalSmolVLMBackend, VisionDocumentExtractor
 
 __all__ = [
+    "DEFAULT_RERANKER_MODEL_ID",
+    "DEFAULT_RERANKER_MODEL_REVISION",
+    "BM25Config",
+    "BM25Retriever",
     "ChromaVectorStore",
     "DeclaredFamilyClassifier",
+    "DenseRetriever",
     "DeterministicEvaluator",
     "EvidenceChunker",
     "ExtractiveGenerator",
     "FilesystemSourceConnector",
     "HashingEmbedder",
+    "HybridRetriever",
     "InMemoryTelemetry",
     "InMemoryVectorStore",
     "LayoutDocumentExtractor",
+    "LocalCrossEncoderReranker",
     "LocalFasterWhisperTranscriber",
     "LocalSmolVLMBackend",
     "MediaDocumentExtractor",

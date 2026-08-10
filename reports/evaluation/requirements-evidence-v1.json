@@ -1,0 +1,13 @@
+{
+  "schema_version": "ragkit-requirement-evidence/v1",
+  "report_set": ["five-family-execution-v1.json", "sparse-text-evaluation-v1.json", "hybrid-text-evaluation-v1.json"],
+  "requirements": {
+    "F-13": {"status": "proven", "evidence": ["five-family-execution-v1.json#families.text", "tests/integration/test_phase4_evaluation_runner.py"]},
+    "F-14": {"status": "partial", "evidence": ["five-family-execution-v1.json#families.ocr", "tests/integration/test_ocr_layout_integration.py"], "gap": "OCR extraction, confidence, retrieval, and locator evidence pass; citation coverage fails."},
+    "F-15": {"status": "partial", "evidence": ["five-family-execution-v1.json#families.layout", "tests/integration/test_ocr_layout_integration.py"], "gap": "The gold cell is indexed, but business-faithful retrieval and citation fail."},
+    "F-16": {"status": "open", "evidence": ["five-family-execution-v1.json#families.vision", "tests/integration/test_vision_media_ml_integration.py"], "gap": "The bounded runner declares vision ineligible after resource preflight; no image-region quality claim is made."},
+    "F-17": {"status": "partial", "evidence": ["five-family-execution-v1.json#families.media", "tests/integration/test_vision_media_ml_integration.py"], "gap": "The audio timestamp case passes; the matrix does not prove video keyframe/scene citation quality."},
+    "F-18": {"status": "proven", "evidence": ["tests/unit/domain/test_domain_contracts.py", "tests/contract/test_phase2_adapter_contracts.py"]},
+    "NFR-10": {"status": "partial", "evidence": ["five-family-execution-v1.json", "tests/contract/test_phase2_adapter_contracts.py", "tests/unit/adapters/test_textual_adapters.py"], "gap": "Unsupported and degraded paths are explicit, but F-14 through F-17 retain the report gaps named above."}
+  }
+}

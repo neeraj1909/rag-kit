@@ -153,6 +153,20 @@ class Chunk:
         )
 
 
+def derive_chunk_id(chunk: Chunk, chunker: ComponentFingerprint) -> ChunkId:
+    """Recompute stable chunk identity from exact representation and provenance."""
+
+    return ChunkId.from_content(
+        chunk.document_id,
+        chunker,
+        tuple(
+            (part_id, provenance.locator)
+            for part_id, provenance in zip(chunk.source_part_ids, chunk.provenance, strict=True)
+        ),
+        chunk.text,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Embedding:
     values: tuple[float, ...]
@@ -216,9 +230,12 @@ class RetrievalScore:
 
 @dataclass(frozen=True, slots=True)
 class ScoredChunk:
+    """One ranked chunk plus current score and uncalibrated prior-stage history."""
+
     chunk: Chunk
     score: RetrievalScore
     rank: int
+    prior_scores: tuple[RetrievalScore, ...] = ()
 
     def __post_init__(self) -> None:
         if self.rank < 1:

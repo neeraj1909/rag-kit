@@ -18,6 +18,7 @@ from ragkit.ports import (
     Reranker,
     Retriever,
     SourceConnector,
+    SparseIndex,
     Telemetry,
     VectorStore,
 )
@@ -33,6 +34,7 @@ PORTS = (
     Embedder,
     VectorStore,
     Retriever,
+    SparseIndex,
     Reranker,
     PromptBuilder,
     Generator,

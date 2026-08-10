@@ -181,9 +181,21 @@ class DeleteRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class SparseUpsertRequest:
+    chunks: tuple[Chunk, ...]
+    manifest: IndexManifest
+
+    def __post_init__(self) -> None:
+        chunk_ids = tuple(chunk.chunk_id for chunk in self.chunks)
+        if len(set(chunk_ids)) != len(chunk_ids):
+            raise InvalidDomainValueError("sparse upsert contains duplicate chunk IDs")
+
+
+@dataclass(frozen=True, slots=True)
 class RetrievalRequest:
     query: str
     top_k: int
+    expected_manifest: IndexManifest
     filters: MetadataFilter | None = None
 
     def __post_init__(self) -> None:

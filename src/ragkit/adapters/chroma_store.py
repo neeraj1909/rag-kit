@@ -29,6 +29,7 @@ from ragkit.domain import (
     ScoreKind,
     ScoreProvenance,
     UnsupportedCapabilityError,
+    derive_chunk_id,
 )
 from ragkit.ports import DeleteRequest, UpsertRequest, VectorSearchRequest, VectorStore
 
@@ -67,8 +68,17 @@ class ChromaVectorStore(VectorStore):
             "vector_store", "chroma_persistent", {"version": 1, "metric": "cosine"}
         )
 
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return self._fingerprint
+
     def upsert(self, request: UpsertRequest) -> None:
         self._require_cosine_manifest(request.manifest)
+        if any(
+            chunk.chunk_id != derive_chunk_id(chunk, request.manifest.chunker_fingerprint)
+            for chunk in request.chunks
+        ):
+            raise IntegrityError("Chroma upsert chunk ID does not match stable content")
         for embedding in request.embeddings.embeddings:
             _require_unit_length(embedding.values)
         collection = self._open(request.manifest, create=True)

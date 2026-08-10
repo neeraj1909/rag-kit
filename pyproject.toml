@@ -47,6 +47,10 @@ media = [
 ]
 persistent = ["chromadb>=1,<2"]
 hosted = ["openai>=2,<3"]
+reranking = [
+  "torch>=2.7,<3",
+  "transformers>=4.57,<6",
+]
 
 [dependency-groups]
 dev = [

@@ -2098,6 +2098,10 @@ ocr = [
 persistent = [
     { name = "chromadb" },
 ]
+reranking = [
+    { name = "torch" },
+    { name = "transformers" },
+]
 vision = [
     { name = "pillow" },
     { name = "torch" },
@@ -2128,11 +2132,13 @@ requires-dist = [
     { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.13,<0.4" },
     { name = "python-pptx", marker = "extra == 'layout'", specifier = ">=1.0,<2" },
     { name = "scenedetect", extras = ["opencv"], marker = "extra == 'media'", specifier = ">=0.6.7,<0.7" },
+    { name = "torch", marker = "extra == 'reranking'", specifier = ">=2.7,<3" },
     { name = "torch", marker = "extra == 'vision'", specifier = ">=2.7,<3" },
     { name = "torchvision", marker = "extra == 'vision'", specifier = ">=0.22,<1" },
+    { name = "transformers", marker = "extra == 'reranking'", specifier = ">=4.57,<6" },
     { name = "transformers", marker = "extra == 'vision'", specifier = ">=4.57,<6" },
 ]
-provides-extras = ["text", "ocr", "layout", "vision", "media", "persistent", "hosted"]
+provides-extras = ["text", "ocr", "layout", "vision", "media", "persistent", "hosted", "reranking"]
 
 [package.metadata.requires-dev]
 dev = [

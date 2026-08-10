@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from collections.abc import Mapping
@@ -22,6 +23,7 @@ class ComponentSelections:
     chunker: str
     embedder: str
     vector_store: str
+    retriever: str
     reranker: str
     prompt_builder: str
     generator: str
@@ -75,6 +77,18 @@ class AdapterSettings:
     batch_size: int = 8
     max_length: int = 256
     pooling: str = "mean"
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
+    bm25_token_pattern: str = r"[^\W_]+"
+    bm25_lowercase: bool = True
+    hybrid_rrf_k: int = 60
+    hybrid_candidate_multiplier: int = 4
+    reranker_model_id: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    reranker_revision: str = "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+    reranker_batch_size: int = 16
+    reranker_max_length: int = 512
+    reranker_max_top_k: int = 100
+    reranker_max_candidates: int = 1_000
     vision_model_id: str = "HuggingFaceTB/SmolVLM-256M-Instruct"
     vision_revision: str = "7e3e67edbbed1bf9888184d9df282b700a323964"
     vision_max_new_tokens: int = 8
@@ -95,6 +109,23 @@ class AdapterSettings:
     max_retries: int = 2
 
     def __post_init__(self) -> None:
+        phase4_integers = (
+            self.hybrid_rrf_k,
+            self.hybrid_candidate_multiplier,
+            self.reranker_batch_size,
+            self.reranker_max_length,
+            self.reranker_max_top_k,
+            self.reranker_max_candidates,
+        )
+        if any(type(value) is not int for value in phase4_integers):
+            raise InvalidDomainValueError("Phase 4 count and limit settings must be integers")
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in (self.bm25_k1, self.bm25_b)
+        ):
+            raise InvalidDomainValueError("BM25 numeric settings must be finite numbers")
         strings = (
             self.ocr_language,
             self.persistence_path,
@@ -102,14 +133,27 @@ class AdapterSettings:
             self.embedder_model_id,
             self.vision_model_id,
             self.media_model_id,
+            self.reranker_model_id,
+            self.bm25_token_pattern,
             self.hosted_model,
             self.credential_env,
         )
         if any(not value.strip() for value in strings):
             raise InvalidDomainValueError("adapter string settings must not be blank")
+        if type(self.bm25_lowercase) is not bool:
+            raise InvalidDomainValueError("bm25_lowercase must be a boolean")
+        try:
+            re.compile(self.bm25_token_pattern)
+        except re.error as error:
+            raise InvalidDomainValueError("bm25_token_pattern must be a valid regex") from error
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.credential_env) is None:
             raise InvalidDomainValueError("credential_env must be an environment-variable name")
-        revisions = (self.embedder_revision, self.vision_revision, self.media_revision)
+        revisions = (
+            self.embedder_revision,
+            self.vision_revision,
+            self.media_revision,
+            self.reranker_revision,
+        )
         if any(
             len(value) != 40 or any(char not in "0123456789abcdef" for char in value)
             for value in revisions
@@ -138,6 +182,12 @@ class AdapterSettings:
                 self.media_max_duration_ms,
                 self.media_max_segments,
                 self.media_max_scenes,
+                self.hybrid_rrf_k,
+                self.hybrid_candidate_multiplier,
+                self.reranker_batch_size,
+                self.reranker_max_length,
+                self.reranker_max_top_k,
+                self.reranker_max_candidates,
             )
             <= 0
             or min(
@@ -146,10 +196,22 @@ class AdapterSettings:
                 self.vision_timeout_seconds,
                 self.media_timeout_seconds,
                 self.layout_max_compression_ratio,
+                self.bm25_k1,
+                self.bm25_b,
             )
             <= 0
         ):
             raise InvalidDomainValueError("adapter numeric limits must be positive")
+        if self.bm25_b > 1.0:
+            raise InvalidDomainValueError("bm25_b must not exceed 1")
+        if self.reranker_max_top_k > self.reranker_max_candidates:
+            raise InvalidDomainValueError(
+                "reranker_max_top_k must not exceed reranker_max_candidates"
+            )
+        if self.reranker_batch_size > 128 or self.reranker_max_length > 512:
+            raise InvalidDomainValueError(
+                "reranker batch size and sequence length exceed supported bounds"
+            )
         if type(self.max_retries) is not int or self.max_retries < 0:
             raise InvalidDomainValueError("max_retries must be a non-negative integer")
 
@@ -303,6 +365,38 @@ def load_config(path: str | Path) -> OfflineProfile:
             batch_size=cast(int, raw_settings.get("batch_size", defaults.batch_size)),
             max_length=cast(int, raw_settings.get("max_length", defaults.max_length)),
             pooling=cast(str, raw_settings.get("pooling", defaults.pooling)),
+            bm25_k1=cast(float, raw_settings.get("bm25_k1", defaults.bm25_k1)),
+            bm25_b=cast(float, raw_settings.get("bm25_b", defaults.bm25_b)),
+            bm25_token_pattern=cast(
+                str, raw_settings.get("bm25_token_pattern", defaults.bm25_token_pattern)
+            ),
+            bm25_lowercase=cast(bool, raw_settings.get("bm25_lowercase", defaults.bm25_lowercase)),
+            hybrid_rrf_k=cast(int, raw_settings.get("hybrid_rrf_k", defaults.hybrid_rrf_k)),
+            hybrid_candidate_multiplier=cast(
+                int,
+                raw_settings.get(
+                    "hybrid_candidate_multiplier", defaults.hybrid_candidate_multiplier
+                ),
+            ),
+            reranker_model_id=cast(
+                str, raw_settings.get("reranker_model_id", defaults.reranker_model_id)
+            ),
+            reranker_revision=cast(
+                str, raw_settings.get("reranker_revision", defaults.reranker_revision)
+            ),
+            reranker_batch_size=cast(
+                int, raw_settings.get("reranker_batch_size", defaults.reranker_batch_size)
+            ),
+            reranker_max_length=cast(
+                int, raw_settings.get("reranker_max_length", defaults.reranker_max_length)
+            ),
+            reranker_max_top_k=cast(
+                int, raw_settings.get("reranker_max_top_k", defaults.reranker_max_top_k)
+            ),
+            reranker_max_candidates=cast(
+                int,
+                raw_settings.get("reranker_max_candidates", defaults.reranker_max_candidates),
+            ),
             vision_model_id=cast(
                 str, raw_settings.get("vision_model_id", defaults.vision_model_id)
             ),

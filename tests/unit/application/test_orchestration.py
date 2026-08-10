@@ -68,8 +68,12 @@ from ragkit.ports import (
     PromptRequest,
     Reranker,
     RerankRequest,
+    RetrievalRequest,
+    Retriever,
     SourceConnector,
     SourceRequest,
+    SparseIndex,
+    SparseUpsertRequest,
     Telemetry,
     TelemetryEvent,
     TelemetryOutcome,
@@ -331,15 +335,41 @@ class RecordingChunker(Chunker):
         if self.provenance_tamper == "provenance":
             altered = replace(chunk.provenance[0], confidence=0.321)
             return (replace(chunk, provenance=(altered,)),)
+        if self.provenance_tamper == "id":
+            return (replace(chunk, chunk_id=ChunkId.from_payload({"tampered": True})),)
         if self.provenance_tamper == "narrowed":
             narrowed = replace(chunk.provenance[0], locator=TextSpanLocator(1, 7))
-            return (replace(chunk, text="videnc", provenance=(narrowed,)),)
+            text = "videnc"
+            return (
+                replace(
+                    chunk,
+                    chunk_id=ChunkId.from_content(
+                        chunk.document_id,
+                        self.fingerprint,
+                        ((chunk.source_part_ids[0], narrowed.locator),),
+                        text,
+                    ),
+                    text=text,
+                    provenance=(narrowed,),
+                ),
+            )
         if self.provenance_tamper == "page_box":
             narrowed = replace(
                 chunk.provenance[0],
                 locator=BoxLocator(0, 0.1, 0.1, 0.9, 0.9),
             )
-            return (replace(chunk, provenance=(narrowed,)),)
+            return (
+                replace(
+                    chunk,
+                    chunk_id=ChunkId.from_content(
+                        chunk.document_id,
+                        self.fingerprint,
+                        ((chunk.source_part_ids[0], narrowed.locator),),
+                        chunk.text,
+                    ),
+                    provenance=(narrowed,),
+                ),
+            )
         return (chunk,)
 
 
@@ -373,6 +403,10 @@ class RecordingStore(VectorStore):
         self.upsert_request: UpsertRequest | None = None
         self.search_request: VectorSearchRequest | None = None
 
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return fingerprint("vector_store")
+
     def upsert(self, request: UpsertRequest) -> None:
         self.calls.append("upsert")
         self.upsert_request = request
@@ -384,6 +418,35 @@ class RecordingStore(VectorStore):
 
     def delete(self, request: DeleteRequest) -> None:
         self.calls.append("delete")
+
+
+class RecordingSparseIndex(SparseIndex):
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+        self.upsert_request: SparseUpsertRequest | None = None
+
+    def upsert(self, request: SparseUpsertRequest) -> None:
+        self.calls.append("sparse_upsert")
+        self.upsert_request = request
+
+    def delete(self, request: DeleteRequest) -> None:
+        self.calls.append("sparse_delete")
+
+
+class RecordingRetriever(Retriever):
+    def __init__(self, calls: list[str], candidates: tuple[ScoredChunk, ...]) -> None:
+        self.calls = calls
+        self.candidates = candidates
+        self.request: RetrievalRequest | None = None
+
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return fingerprint("retriever")
+
+    def retrieve(self, request: RetrievalRequest) -> tuple[ScoredChunk, ...]:
+        self.calls.append("retrieve")
+        self.request = request
+        return self.candidates[: request.top_k]
 
 
 class RecordingReranker(Reranker):
@@ -478,8 +541,10 @@ def indexing_service(
     extractor_empty: bool = False,
     chunker_empty: bool = False,
     extraction_error: Exception | None = None,
-) -> tuple[IndexingService, RecordingStore, RecordingTelemetry]:
+    with_sparse_index: bool = False,
+) -> tuple[IndexingService, RecordingStore, RecordingSparseIndex | None, RecordingTelemetry]:
     store = RecordingStore(calls)
+    sparse_index = RecordingSparseIndex(calls) if with_sparse_index else None
     telemetry = RecordingTelemetry(calls)
     return (
         IndexingService(
@@ -491,9 +556,11 @@ def indexing_service(
             RecordingEmbedder(calls),
             store,
             telemetry,
+            sparse_index=sparse_index,
             clock=StepClock(),
         ),
         store,
+        sparse_index,
         telemetry,
     )
 
@@ -503,7 +570,7 @@ def test_indexing_sequences_every_family_through_manifest_checked_upsert(
     family: DocumentFamily,
 ) -> None:
     calls: list[str] = []
-    service, store, telemetry = indexing_service(calls, family)
+    service, store, _, telemetry = indexing_service(calls, family)
 
     result = service.run(IndexingRequest("memory://fixture", manifest()))
 
@@ -520,6 +587,9 @@ def test_indexing_sequences_every_family_through_manifest_checked_upsert(
     assert (result.asset_count, result.document_count, result.chunk_count) == (1, 1, 1)
     assert result.diagnostics == ()
     assert store.upsert_request is not None and store.upsert_request.manifest == manifest()
+    assert result.indexed_chunk_ids == (store.upsert_request.chunks[0].chunk_id,)
+    assert result.indexed_evidence[0].chunk_id == result.indexed_chunk_ids[0]
+    assert result.indexed_evidence[0].provenance == store.upsert_request.chunks[0].provenance
     assert [event.operation for event in telemetry.events] == [
         "index.fetch",
         "index.classify",
@@ -532,6 +602,25 @@ def test_indexing_sequences_every_family_through_manifest_checked_upsert(
     assert all(event.outcome is TelemetryOutcome.SUCCESS for event in telemetry.events)
     assert all(event.finished_ns > event.started_ns for event in telemetry.events)
     assert all(event.attributes == () for event in telemetry.events)
+
+
+def test_indexing_updates_sparse_index_with_the_same_chunks_and_manifest() -> None:
+    calls: list[str] = []
+    service, store, sparse_index, telemetry = indexing_service(
+        calls, DocumentFamily.TEXT, with_sparse_index=True
+    )
+
+    result = service.run(IndexingRequest("memory://fixture", manifest()))
+
+    assert result.chunk_count == 1
+    assert store.upsert_request is not None
+    assert sparse_index is not None and sparse_index.upsert_request is not None
+    assert sparse_index.upsert_request.chunks == store.upsert_request.chunks
+    assert sparse_index.upsert_request.manifest == store.upsert_request.manifest
+    assert [event.operation for event in telemetry.events][-2:] == [
+        "index.upsert",
+        "index.sparse_upsert",
+    ]
 
 
 def test_indexing_passes_mixed_content_to_capabilities_without_family_branching() -> None:
@@ -579,7 +668,7 @@ def test_indexing_reports_safe_omissions_without_calling_later_capabilities(
     empty_at: str, code: str, expected_calls: list[str]
 ) -> None:
     calls: list[str] = []
-    service, store, _ = indexing_service(
+    service, store, _, _ = indexing_service(
         calls,
         DocumentFamily.TEXT,
         connector_empty=empty_at == "connector",
@@ -597,7 +686,7 @@ def test_indexing_reports_safe_omissions_without_calling_later_capabilities(
 
 def test_indexing_rejects_silently_omitted_classifications() -> None:
     calls: list[str] = []
-    service, _, telemetry = indexing_service(calls, DocumentFamily.TEXT, classifier_omit=True)
+    service, _, _, telemetry = indexing_service(calls, DocumentFamily.TEXT, classifier_omit=True)
 
     with pytest.raises(IntegrityError, match="classification"):
         service.run(IndexingRequest("memory://fixture", manifest()))
@@ -610,7 +699,7 @@ def test_indexing_rejects_silently_omitted_classifications() -> None:
 def test_indexing_propagates_capability_errors_and_records_sanitized_error_timing() -> None:
     calls: list[str] = []
     error = UnsupportedCapabilityError("OCR unavailable", capability="ocr")
-    service, _, telemetry = indexing_service(calls, DocumentFamily.OCR, extraction_error=error)
+    service, _, _, telemetry = indexing_service(calls, DocumentFamily.OCR, extraction_error=error)
 
     with pytest.raises(UnsupportedCapabilityError) as caught:
         service.run(IndexingRequest("memory://customer-secret", manifest()))
@@ -625,7 +714,7 @@ def test_indexing_propagates_capability_errors_and_records_sanitized_error_timin
 
 def test_indexing_rejects_manifest_components_before_acquisition() -> None:
     calls: list[str] = []
-    service, _, _ = indexing_service(calls, DocumentFamily.TEXT)
+    service, _, _, _ = indexing_service(calls, DocumentFamily.TEXT)
     incompatible = replace(manifest(), chunker_fingerprint=fingerprint("other_chunker"))
 
     with pytest.raises(IndexCompatibilityError) as caught:
@@ -702,6 +791,29 @@ def test_indexing_rejects_chunks_that_do_not_resolve_to_projected_part_provenanc
         service.run(IndexingRequest("memory://fixture", manifest()))
 
 
+def test_indexing_rejects_invalid_chunk_identity_before_any_store_mutation() -> None:
+    calls: list[str] = []
+    service = IndexingService(
+        RecordingConnector(calls),
+        RecordingClassifier(calls, DocumentFamily.TEXT),
+        RecordingExtractor(calls, DocumentFamily.TEXT),
+        RecordingProjector(calls),
+        RecordingChunker(calls, provenance_tamper="id"),
+        RecordingEmbedder(calls),
+        RecordingStore(calls),
+        RecordingTelemetry(calls),
+        sparse_index=RecordingSparseIndex(calls),
+        clock=StepClock(),
+    )
+
+    with pytest.raises(IntegrityError, match="chunk ID"):
+        service.run(IndexingRequest("memory://fixture", manifest()))
+
+    assert "embed_documents" not in calls
+    assert "upsert" not in calls
+    assert "sparse_upsert" not in calls
+
+
 def test_indexing_accepts_chunk_provenance_narrowed_within_the_source_part() -> None:
     calls: list[str] = []
     telemetry = RecordingTelemetry(calls)
@@ -752,20 +864,19 @@ def answering_service(
     foreign_citation: ChunkId | None = None,
     generation_error: Exception | None = None,
     substituted_chunk: Chunk | None = None,
-) -> tuple[AnsweringService, RecordingStore, RecordingTelemetry]:
-    store = RecordingStore(calls, candidates)
+) -> tuple[AnsweringService, RecordingRetriever, RecordingTelemetry]:
+    retriever = RecordingRetriever(calls, candidates)
     telemetry = RecordingTelemetry(calls)
     return (
         AnsweringService(
-            RecordingEmbedder(calls),
-            store,
+            retriever,
             RecordingReranker(calls, empty=rerank_empty, substituted_chunk=substituted_chunk),
             RecordingPromptBuilder(calls),
             RecordingGenerator(calls, foreign_citation=foreign_citation, error=generation_error),
             telemetry,
             clock=StepClock(),
         ),
-        store,
+        retriever,
         telemetry,
     )
 
@@ -773,13 +884,12 @@ def answering_service(
 def test_answering_sequences_search_to_generation_and_resolves_exact_citations() -> None:
     calls: list[str] = []
     candidate = scored_chunk()
-    service, store, telemetry = answering_service(calls, candidates=(candidate,))
+    service, retriever, telemetry = answering_service(calls, candidates=(candidate,))
 
     result = service.run(AnsweringRequest("What happened?", manifest()))
 
     assert [item for item in calls if not item.startswith("telemetry:")] == [
-        "embed_query",
-        "search",
+        "retrieve",
         "rerank",
         "prompt",
         "generate",
@@ -790,11 +900,11 @@ def test_answering_sequences_search_to_generation_and_resolves_exact_citations()
     assert result.citations[0].document_id == candidate.chunk.document_id
     assert result.citations[0].rank == candidate.rank
     assert result.citations[0].provenance == candidate.chunk.provenance
-    assert store.search_request is not None
-    assert store.search_request.expected_manifest == manifest()
+    assert retriever.request is not None
+    assert retriever.request.expected_manifest == manifest()
+    assert retriever.request.query == "What happened?"
     assert [event.operation for event in telemetry.events] == [
-        "ask.embed_query",
-        "ask.search",
+        "ask.retrieve",
         "ask.rerank",
         "ask.prompt",
         "ask.generate",
@@ -804,8 +914,8 @@ def test_answering_sequences_search_to_generation_and_resolves_exact_citations()
 @pytest.mark.parametrize(
     ("rerank_empty", "code", "expected_calls"),
     [
-        (False, "no_search_results", ["embed_query", "search"]),
-        (True, "no_rerank_results", ["embed_query", "search", "rerank"]),
+        (False, "no_retrieval_results", ["retrieve"]),
+        (True, "no_rerank_results", ["retrieve", "rerank"]),
     ],
 )
 def test_answering_stops_cleanly_on_empty_results(
@@ -850,16 +960,15 @@ def test_answering_records_generation_exceptions_without_content_attributes() ->
     assert "private question" not in str(telemetry.events[-1])
 
 
-def test_answering_rejects_manifest_components_before_embedding() -> None:
+def test_answering_passes_manifest_compatibility_to_retriever() -> None:
     calls: list[str] = []
-    service, _, _ = answering_service(calls, candidates=(scored_chunk(),))
+    service, retriever, _ = answering_service(calls, candidates=(scored_chunk(),))
     incompatible = replace(manifest(), embedder_fingerprint=fingerprint("other_embedder"))
 
-    with pytest.raises(IndexCompatibilityError) as caught:
-        service.run(AnsweringRequest("question", incompatible))
+    service.run(AnsweringRequest("question", incompatible))
 
-    assert "embedder_fingerprint" in caught.value.differences
-    assert calls == []
+    assert retriever.request is not None
+    assert retriever.request.expected_manifest == incompatible
 
 
 def test_answering_rejects_out_of_order_search_results() -> None:
@@ -899,7 +1008,7 @@ def test_answering_rejects_reranker_chunk_substitution_under_the_same_id() -> No
 def test_public_pipeline_facade_delegates_to_both_use_cases() -> None:
     index_calls: list[str] = []
     ask_calls: list[str] = []
-    indexing, _, _ = indexing_service(index_calls, DocumentFamily.TEXT)
+    indexing, _, _, _ = indexing_service(index_calls, DocumentFamily.TEXT)
     answering, _, _ = answering_service(ask_calls, candidates=(scored_chunk(),))
     pipeline = RagPipeline(indexing, answering)
 

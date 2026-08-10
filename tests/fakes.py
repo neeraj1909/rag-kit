@@ -210,6 +210,10 @@ class FakeVectorStore(VectorStore):
     def size(self) -> int:
         return len(self._entries)
 
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return _fingerprint("vector_store")
+
     def _require_manifest(self, expected: IndexManifest) -> None:
         if self._manifest is None:
             return
@@ -265,6 +269,10 @@ class FakeVectorStore(VectorStore):
 class FakeRetriever(Retriever):
     def __init__(self, candidates: tuple[ScoredChunk, ...]) -> None:
         self._candidates = candidates
+
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return _fingerprint("retriever")
 
     def retrieve(self, request: RetrievalRequest) -> tuple[ScoredChunk, ...]:
         if request.filters is not None:

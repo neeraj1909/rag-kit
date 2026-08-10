@@ -10,6 +10,12 @@ pinned CPU Torch embedder, persistent Chroma, and an optional hosted generator.
 The CLI inspects every profile without importing optional SDKs or reading secret
 values.
 
+Phase 4 adds manifest-bound BM25, rank-only reciprocal-rank fusion, a pinned
+local cross-encoder reranker, versioned five-family evaluation metrics, and an
+honest benchmark harness. Retrieval and reranking strategies change through
+profile configuration; native scores from different stages are never treated
+as calibrated values.
+
 ## Offline quickstart
 
 ```bash
@@ -49,6 +55,23 @@ review the artifact, and then opt into model integration with
 credential environment variable. See `docs/production-adapters.md` and the
 business recipes under `docs/recipes/`.
 
+## Phase 4 retrieval profiles
+
+```bash
+uv run ragkit ask --config configs/sparse.toml "What is the fixture answer?"
+uv run ragkit ask --config configs/hybrid.toml "What is the fixture answer?"
+
+# This profile requires the exact cached model revision described by inspection.
+uv run ragkit inspect-config --config configs/reranked.toml
+uv sync --frozen --extra reranking --group dev
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  uv run ragkit ask --config configs/reranked.toml "What is the fixture answer?"
+```
+
+BM25 scores, dense similarities, reciprocal-rank fusion values, and
+cross-encoder logits retain separate provenance. See `docs/evaluation.md` for
+the fixed-dataset quality report and benchmark commands.
+
 ## Development baseline
 
 - Python: 3.12 locally; supported range is recorded in `pyproject.toml`.
@@ -84,6 +107,7 @@ fail explicitly when a requested capability is unavailable.
 | `media` | faster-whisper plus PySceneDetect/OpenCV |
 | `persistent` | Chroma behind the vector-store port |
 | `hosted` | OpenAI SDK behind optional provider adapters |
+| `reranking` | PyTorch and Transformers for the revision-pinned local cross-encoder |
 
 The lockfile records resolved Python package versions. System binaries, model
 weights, codecs, language data, and fixture licenses remain separately

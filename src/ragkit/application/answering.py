@@ -11,7 +11,6 @@ from ragkit.domain import (
     ChunkId,
     DocumentId,
     ExtractionProvenance,
-    IndexCompatibilityError,
     IndexManifest,
     IntegrityError,
     InvalidDomainValueError,
@@ -19,7 +18,6 @@ from ragkit.domain import (
     ScoredChunk,
 )
 from ragkit.ports import (
-    Embedder,
     GenerationRequest,
     GenerationResult,
     Generator,
@@ -27,9 +25,9 @@ from ragkit.ports import (
     PromptRequest,
     Reranker,
     RerankRequest,
+    RetrievalRequest,
+    Retriever,
     Telemetry,
-    VectorSearchRequest,
-    VectorStore,
 )
 
 from ._telemetry import PipelineDiagnostic, StageTiming, invoke_timed
@@ -91,12 +89,11 @@ class AnsweringResult:
 
 
 class AnsweringService:
-    """Coordinate injected query embedding, search, reranking, and generation."""
+    """Coordinate injected retrieval, reranking, prompting, and generation."""
 
     def __init__(
         self,
-        embedder: Embedder,
-        vector_store: VectorStore,
+        retriever: Retriever,
         reranker: Reranker,
         prompt_builder: PromptBuilder,
         generator: Generator,
@@ -104,8 +101,7 @@ class AnsweringService:
         *,
         clock: Callable[[], int] = perf_counter_ns,
     ) -> None:
-        self._embedder = embedder
-        self._vector_store = vector_store
+        self._retriever = retriever
         self._reranker = reranker
         self._prompt_builder = prompt_builder
         self._generator = generator
@@ -113,35 +109,26 @@ class AnsweringService:
         self._clock = clock
 
     def run(self, request: AnsweringRequest) -> AnsweringResult:
-        """Embed, search, rerank, build a prompt, generate, and resolve citations."""
+        """Retrieve, rerank, build a prompt, generate, and resolve citations."""
 
-        self._require_manifest_components(request.expected_manifest)
         timings: list[StageTiming] = []
-        query_embedding = invoke_timed(
-            "ask.embed_query",
-            lambda: self._embedder.embed_query(request.query),
-            self._telemetry,
-            self._clock,
-            timings,
-        )
         candidates = invoke_timed(
-            "ask.search",
-            lambda: self._vector_store.search(
-                VectorSearchRequest(
-                    query_embedding,
-                    self._embedder.fingerprint,
+            "ask.retrieve",
+            lambda: self._retriever.retrieve(
+                RetrievalRequest(
+                    request.query,
                     request.retrieval_top_k,
-                    request.filters,
                     request.expected_manifest,
+                    request.filters,
                 )
             ),
             self._telemetry,
             self._clock,
             timings,
         )
-        self._validate_ranked("search", candidates, request.retrieval_top_k)
+        self._validate_ranked("retrieval", candidates, request.retrieval_top_k)
         if not candidates:
-            return self._omitted("retrieval", "no_search_results", timings)
+            return self._omitted("retrieval", "no_retrieval_results", timings)
 
         context = invoke_timed(
             "ask.rerank",
@@ -208,21 +195,6 @@ class AnsweringService:
             for chunk_id in generation.cited_chunk_ids
         )
         return AnsweringResult(generation, context, citations, (), tuple(timings))
-
-    def _require_manifest_components(self, manifest: IndexManifest) -> None:
-        differences: dict[str, tuple[object, object]] = {}
-        if manifest.embedder_fingerprint != self._embedder.fingerprint:
-            differences["embedder_fingerprint"] = (
-                manifest.embedder_fingerprint,
-                self._embedder.fingerprint,
-            )
-        if manifest.embedding_dimension != self._embedder.dimension:
-            differences["embedding_dimension"] = (
-                manifest.embedding_dimension,
-                self._embedder.dimension,
-            )
-        if differences:
-            raise IndexCompatibilityError(differences)
 
     @staticmethod
     def _validate_ranked(stage: str, values: tuple[ScoredChunk, ...], top_k: int) -> None:

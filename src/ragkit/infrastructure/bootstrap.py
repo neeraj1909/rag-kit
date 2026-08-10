@@ -10,16 +10,21 @@ from typing import TypeVar
 from urllib.parse import unquote, urlparse
 
 from ragkit.adapters import (
+    BM25Config,
+    BM25Retriever,
     ChromaVectorStore,
     DeclaredFamilyClassifier,
+    DenseRetriever,
     DeterministicEvaluator,
     EvidenceChunker,
     ExtractiveGenerator,
     FilesystemSourceConnector,
     HashingEmbedder,
+    HybridRetriever,
     InMemoryTelemetry,
     InMemoryVectorStore,
     LayoutDocumentExtractor,
+    LocalCrossEncoderReranker,
     LocalFasterWhisperTranscriber,
     LocalSmolVLMBackend,
     MediaDocumentExtractor,
@@ -54,7 +59,9 @@ from ragkit.ports import (
     Generator,
     PromptBuilder,
     Reranker,
+    Retriever,
     SourceConnector,
+    SparseIndex,
     Telemetry,
     VectorStore,
 )
@@ -243,6 +250,19 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
         )
     if profile.components.vector_store == "chroma":
         requirements.append(OptionalCapability("persistent", "chromadb"))
+    if profile.components.reranker == "cross-encoder":
+        requirements.extend(
+            (
+                OptionalCapability("reranking", "torch"),
+                OptionalCapability(
+                    "reranking",
+                    "transformers",
+                    model=(
+                        f"{profile.settings.reranker_model_id}@{profile.settings.reranker_revision}"
+                    ),
+                ),
+            )
+        )
     if profile.components.generator == "openai":
         requirements.append(
             OptionalCapability("hosted", "openai", credential_env=profile.settings.credential_env)
@@ -276,7 +296,17 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
             "adapter": {
                 key: value
                 for key, value in asdict(profile.settings).items()
-                if key.startswith(("ocr_max_", "layout_max_", "vision_max_", "media_max_"))
+                if key.startswith(
+                    (
+                        "ocr_max_",
+                        "layout_max_",
+                        "vision_max_",
+                        "media_max_",
+                        "bm25_",
+                        "hybrid_",
+                        "reranker_",
+                    )
+                )
                 or key.endswith("_timeout_seconds")
                 or key == "timeout_seconds"
             },
@@ -396,7 +426,48 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
         "vector_store",
         components.vector_store,
     )
-    reranker: Reranker = _select({"noop": NoOpReranker}, "reranker", components.reranker)
+    dense_retriever = DenseRetriever(embedder, vector_store)
+    bm25_retriever = BM25Retriever(
+        config=BM25Config(
+            k1=profile.settings.bm25_k1,
+            b=profile.settings.bm25_b,
+            token_pattern=profile.settings.bm25_token_pattern,
+            lowercase=profile.settings.bm25_lowercase,
+        )
+    )
+    retriever: Retriever = _select(
+        {
+            "dense": lambda: dense_retriever,
+            "sparse": lambda: bm25_retriever,
+            "hybrid": lambda: HybridRetriever(
+                (("dense", dense_retriever), ("sparse", bm25_retriever)),
+                rrf_k=profile.settings.hybrid_rrf_k,
+                candidate_multiplier=profile.settings.hybrid_candidate_multiplier,
+                max_candidates=profile.limits.max_chunks,
+            ),
+        },
+        "retriever",
+        components.retriever,
+    )
+    sparse_index: SparseIndex | None = (
+        bm25_retriever if components.retriever in {"sparse", "hybrid"} else None
+    )
+    reranker: Reranker = _select(
+        {
+            "noop": NoOpReranker,
+            "cross-encoder": lambda: LocalCrossEncoderReranker(
+                model_id=profile.settings.reranker_model_id,
+                revision=profile.settings.reranker_revision,
+                device=profile.settings.device,
+                batch_size=profile.settings.reranker_batch_size,
+                max_length=profile.settings.reranker_max_length,
+                max_top_k=profile.settings.reranker_max_top_k,
+                max_candidates=profile.settings.reranker_max_candidates,
+            ),
+        },
+        "reranker",
+        components.reranker,
+    )
     prompt_builder: PromptBuilder = _select(
         {"template": TemplatePromptBuilder}, "prompt_builder", components.prompt_builder
     )
@@ -434,10 +505,10 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
         embedder,
         vector_store,
         telemetry,
+        sparse_index=sparse_index,
     )
     answering = AnsweringService(
-        embedder,
-        vector_store,
+        retriever,
         reranker,
         prompt_builder,
         generator,

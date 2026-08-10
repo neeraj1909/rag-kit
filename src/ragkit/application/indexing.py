@@ -10,6 +10,7 @@ from ragkit.domain import (
     BoxLocator,
     CellLocator,
     Chunk,
+    ChunkId,
     Document,
     ExtractionProvenance,
     IndexCompatibilityError,
@@ -21,6 +22,7 @@ from ragkit.domain import (
     SourceLocator,
     TextSpanLocator,
     TimeSpanLocator,
+    derive_chunk_id,
 )
 from ragkit.ports import (
     AcquiredAsset,
@@ -35,6 +37,8 @@ from ragkit.ports import (
     ProjectionRequest,
     SourceConnector,
     SourceRequest,
+    SparseIndex,
+    SparseUpsertRequest,
     Telemetry,
     UpsertRequest,
     VectorStore,
@@ -71,6 +75,19 @@ class IndexingRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class IndexedEvidence:
+    """Content-free evidence summary produced by the indexing boundary."""
+
+    chunk_id: ChunkId
+    source_part_ids: tuple[str, ...]
+    provenance: tuple[ExtractionProvenance, ...]
+
+    def __post_init__(self) -> None:
+        if not self.source_part_ids or len(self.source_part_ids) != len(self.provenance):
+            raise IntegrityError("indexed evidence parts must align with provenance")
+
+
+@dataclass(frozen=True, slots=True)
 class IndexingResult:
     """Observable indexing outcome without source content or provider details."""
 
@@ -78,8 +95,18 @@ class IndexingResult:
     asset_count: int
     document_count: int
     chunk_count: int
+    indexed_chunk_ids: tuple[ChunkId, ...]
+    indexed_evidence: tuple[IndexedEvidence, ...]
     diagnostics: tuple[PipelineDiagnostic, ...]
     timings: tuple[StageTiming, ...]
+
+    def __post_init__(self) -> None:
+        if self.chunk_count != len(self.indexed_chunk_ids):
+            raise IntegrityError("indexed chunk count must align with returned chunk IDs")
+        if len(set(self.indexed_chunk_ids)) != len(self.indexed_chunk_ids):
+            raise IntegrityError("indexed chunk IDs must be unique")
+        if tuple(item.chunk_id for item in self.indexed_evidence) != self.indexed_chunk_ids:
+            raise IntegrityError("indexed evidence must align with returned chunk IDs")
 
 
 class IndexingService:
@@ -96,6 +123,7 @@ class IndexingService:
         vector_store: VectorStore,
         telemetry: Telemetry,
         *,
+        sparse_index: SparseIndex | None = None,
         clock: Callable[[], int] = perf_counter_ns,
     ) -> None:
         self._connector = connector
@@ -106,6 +134,7 @@ class IndexingService:
         self._embedder = embedder
         self._vector_store = vector_store
         self._telemetry = telemetry
+        self._sparse_index = sparse_index
         self._clock = clock
 
     def run(self, request: IndexingRequest) -> IndexingResult:
@@ -203,11 +232,25 @@ class IndexingService:
             self._clock,
             timings,
         )
+        sparse_index = self._sparse_index
+        if sparse_index is not None:
+            invoke_timed(
+                "index.sparse_upsert",
+                lambda: sparse_index.upsert(SparseUpsertRequest(chunks, request.manifest)),
+                self._telemetry,
+                self._clock,
+                timings,
+            )
         return IndexingResult(
             request.manifest,
             len(assets),
             len(projected),
             len(chunks),
+            tuple(chunk.chunk_id for chunk in chunks),
+            tuple(
+                IndexedEvidence(chunk.chunk_id, chunk.source_part_ids, chunk.provenance)
+                for chunk in chunks
+            ),
             (),
             tuple(timings),
         )
@@ -259,9 +302,8 @@ class IndexingService:
             ):
                 raise IntegrityError("projection must preserve every original part provenance")
 
-    @staticmethod
     def _require_resolved_chunks(
-        documents: tuple[Document, ...], chunks: tuple[Chunk, ...]
+        self, documents: tuple[Document, ...], chunks: tuple[Chunk, ...]
     ) -> None:
         documents_by_id = {document.document_id: document for document in documents}
         for chunk in chunks:
@@ -277,6 +319,9 @@ class IndexingService:
                 for part_id, provenance in zip(chunk.source_part_ids, chunk.provenance, strict=True)
             ):
                 raise IntegrityError("chunk source part provenance must resolve exactly")
+            expected_chunk_id = derive_chunk_id(chunk, self._chunker.fingerprint)
+            if chunk.chunk_id != expected_chunk_id:
+                raise IntegrityError("chunk ID must match exact chunk content and provenance")
 
     @staticmethod
     def _provenance_resolves(source: ExtractionProvenance, derived: ExtractionProvenance) -> bool:
@@ -337,6 +382,8 @@ class IndexingService:
             asset_count,
             document_count,
             0,
+            (),
+            (),
             (PipelineDiagnostic(stage, code, f"{stage} produced no indexable output"),),
             tuple(timings),
         )

@@ -24,6 +24,7 @@ from .models import (
     RerankRequest,
     RetrievalRequest,
     SourceRequest,
+    SparseUpsertRequest,
     TelemetryEvent,
     UpsertRequest,
     VectorSearchRequest,
@@ -167,6 +168,11 @@ class VectorStore(ABC):
     not confidence or probability. Compatibility is checked before any effect.
     """
 
+    @property
+    @abstractmethod
+    def fingerprint(self) -> ComponentFingerprint:
+        """Identify provider, score semantics, persistence mode, and behavior limits."""
+
     @abstractmethod
     def upsert(self, request: UpsertRequest) -> None:
         """Idempotently store aligned chunks and embeddings after manifest validation."""
@@ -192,9 +198,35 @@ class Retriever(ABC):
     on the declared implementation and unchanged index.
     """
 
+    @property
+    @abstractmethod
+    def fingerprint(self) -> ComponentFingerprint:
+        """Identify strategy, child components, fusion, filtering, and score policy."""
+
     @abstractmethod
     def retrieve(self, request: RetrievalRequest) -> tuple[ScoredChunk, ...]:
         """Return at most ``top_k`` candidates under the declared score policy."""
+
+
+class SparseIndex(ABC):
+    """Maintain a manifest-bound lexical index behind a provider-neutral boundary.
+
+    Operations are blocking and thread safety is adapter-specific. Upsert and delete
+    are effects; same-ID compatible upsert and repeated delete are deterministic and
+    idempotent. Invalid limits or records, manifest mismatch, and unsupported index
+    capabilities raise typed errors before mutation. Input order does not define
+    retrieval order. Extraction confidence and retrieval scores are preserved in
+    chunks but neither is synthesized by mutation. Implementations document storage
+    limits and persistence guarantees.
+    """
+
+    @abstractmethod
+    def upsert(self, request: SparseUpsertRequest) -> None:
+        """Store chunks idempotently after validating index compatibility."""
+
+    @abstractmethod
+    def delete(self, request: DeleteRequest) -> None:
+        """Delete named chunks idempotently after validating index compatibility."""
 
 
 class Reranker(ABC):

@@ -139,7 +139,7 @@ def test_inspect_index_ask_evaluate_cli_workflow(capsys: pytest.CaptureFixture[s
     assert evidence["locator"] == {"end": 80, "kind": "text_span", "start": 0}
     assert answered["config_fingerprint"] == inspected["config_fingerprint"]
     assert answered["index_mode"] == "rebuilt_in_process"
-    assert set(answered["timings_ms"]) >= {"index_total", "search", "generate"}
+    assert set(answered["timings_ms"]) >= {"index_total", "retrieve", "generate"}
 
     assert (
         main(
