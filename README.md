@@ -3,9 +3,10 @@
 `rag-kit` is a modular Python foundation for provenance-complete retrieval over
 textual, OCR, layout-aware, vision-language, and time-based documents.
 
-The repository is currently at the Phase 0 foundation boundary. It contains the
-package, dependency and quality configuration plus architectural decisions; the
-domain contracts and runnable RAG pipeline begin in Phase 1 and later slices.
+The repository is currently at the Phase 1 contract boundary. It contains
+immutable multimodal domain records, provider-neutral synchronous ports,
+behavioral adapter contracts, and deterministic fakes. The offline reference
+pipeline begins in Phase 2.
 
 ## Development baseline
 
@@ -14,6 +15,7 @@ domain contracts and runnable RAG pipeline begin in Phase 1 and later slices.
 - Core runtime: dependency-free and importable without modality or provider
   extras.
 - Architecture: see `ARCHITECTURE.md` and `docs/decisions/`.
+- Domain and port semantics: see `docs/contracts.md`.
 - Modality decisions: see `docs/modality-support.md`.
 
 ```bash

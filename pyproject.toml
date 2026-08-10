@@ -76,7 +76,7 @@ show_error_codes = true
 warn_unreachable = true
 
 [tool.pytest.ini_options]
-addopts = ["--strict-config", "--strict-markers"]
+addopts = ["--strict-config", "--strict-markers", "--disable-socket"]
 testpaths = ["tests"]
 markers = [
   "unit: deterministic isolated tests",
