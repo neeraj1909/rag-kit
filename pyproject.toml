@@ -38,6 +38,7 @@ layout = [
 vision = [
   "pillow>=12,<13",
   "torch>=2.7,<3",
+  "torchvision>=0.22,<1",
   "transformers>=4.57,<6",
 ]
 media = [

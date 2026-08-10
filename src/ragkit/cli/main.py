@@ -18,7 +18,7 @@ from ragkit.application import (
     StageTiming,
 )
 from ragkit.domain import InvalidDomainValueError, RagkitError, locator_to_dict
-from ragkit.infrastructure.bootstrap import OfflineRuntime, bootstrap
+from ragkit.infrastructure.bootstrap import OfflineRuntime, bootstrap, inspect_profile
 from ragkit.infrastructure.config import OfflineProfile, load_config
 from ragkit.ports import EvaluationCase, EvaluationExample, EvaluationRequest
 
@@ -30,10 +30,10 @@ def _parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect-config", help="validate and describe a profile")
     inspect.add_argument("--config", required=True, type=Path)
 
-    index = commands.add_parser("index", help="build and validate an offline in-memory index")
+    index = commands.add_parser("index", help="build and validate the configured index")
     _profile_arguments(index)
 
-    ask = commands.add_parser("ask", help="rebuild the offline index and answer one query")
+    ask = commands.add_parser("ask", help="index the source and answer one query")
     _profile_arguments(ask)
     ask.add_argument("query")
 
@@ -170,19 +170,21 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "components": profile.to_dict()["components"],
             "limits": profile.to_dict()["limits"],
             "config_fingerprint": str(profile.fingerprint),
+            "capabilities": inspect_profile(profile),
         }
 
     runtime = bootstrap(profile)
     source = _source(args, profile)
     index_result = _index(runtime, profile, source)
     if args.command == "index":
+        persistent = profile.components.vector_store == "chroma"
         return {
             "profile": profile.name,
             "documents": index_result.document_count,
             "chunks": index_result.chunk_count,
             "index_manifest_fingerprint": str(index_result.manifest.fingerprint),
             "config_fingerprint": str(profile.fingerprint),
-            "storage": "process_local",
+            "storage": "persistent" if persistent else "process_local",
             "timings_ms": _timings(index_result.timings),
             "diagnostics": [item.code for item in index_result.diagnostics],
         }
@@ -205,7 +207,11 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "citations": _citations(answer_result),
             "model_fingerprint": model_fingerprint,
             "config_fingerprint": str(profile.fingerprint),
-            "index_mode": "rebuilt_in_process",
+            "index_mode": (
+                "persistent_upserted_in_process"
+                if profile.components.vector_store == "chroma"
+                else "rebuilt_in_process"
+            ),
             "timings_ms": timings,
             "diagnostics": [item.code for item in answer_result.diagnostics],
         }

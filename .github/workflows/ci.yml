@@ -47,4 +47,40 @@ jobs:
       - name: End-to-end tests
         run: timeout 60 uv run pytest -m e2e --no-cov
       - name: Coverage
-        run: uv run pytest --cov=ragkit --cov-report=term-missing
+        run: uv run pytest -m 'unit or contract' --no-cov
+
+  optional-extras:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        extra: [ocr, layout, vision, media, persistent, hosted]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install Tesseract for OCR
+        if: matrix.extra == 'ocr'
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - name: Install one locked optional boundary
+        run: uv sync --frozen --group dev --extra ${{ matrix.extra }}
+      - name: Verify optional boundary
+        run: timeout 180 uv run pytest --no-cov
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install OCR system dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - name: Install all locked optional boundaries
+        run: uv sync --frozen --group dev --all-extras
+      - name: Coverage without implicit model downloads
+        run: timeout 300 uv run pytest --cov=ragkit --cov-report=term-missing

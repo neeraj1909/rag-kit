@@ -1,0 +1,6 @@
+tests/fixtures/**/*.pdf binary
+tests/fixtures/**/*.pptx binary
+tests/fixtures/**/*.xlsx binary
+tests/fixtures/**/*.png binary
+tests/fixtures/**/*.wav binary
+tests/fixtures/**/*.mp4 binary

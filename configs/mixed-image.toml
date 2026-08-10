@@ -1,0 +1,33 @@
+[profile]
+name = "mixed-equipment-page"
+family = "vision"
+source = "tests/fixtures/vision/equipment.png"
+
+[components]
+connector = "filesystem"
+classifier = "declared"
+extractor = "mixed_image"
+projector = "noop"
+chunker = "evidence"
+embedder = "hashing"
+vector_store = "memory"
+reranker = "noop"
+prompt_builder = "template"
+generator = "extractive"
+evaluator = "deterministic"
+telemetry = "memory"
+
+[limits]
+max_assets = 4
+max_bytes_per_asset = 10485760
+max_documents = 4
+max_parts_per_document = 4096
+max_chunks = 4096
+chunk_chars = 600
+embedding_dimension = 128
+top_k = 3
+max_context_chars = 2400
+max_output_tokens = 160
+
+[settings]
+ocr_language = "eng"

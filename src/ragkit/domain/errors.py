@@ -34,6 +34,10 @@ class ProviderError(RagkitError):
     """An external provider failed after its error was translated."""
 
 
+class OperationTimeoutError(RagkitError):
+    """A bounded adapter operation exceeded its configured wall-clock deadline."""
+
+
 class IntegrityError(RagkitError):
     """Persisted or acquired data violates an integrity requirement."""
 

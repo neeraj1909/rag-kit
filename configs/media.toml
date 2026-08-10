@@ -1,0 +1,30 @@
+[profile]
+name = "media-support"
+family = "media"
+source = "tests/fixtures/media/support.wav"
+
+[components]
+connector = "filesystem"
+classifier = "declared"
+extractor = "media"
+projector = "noop"
+chunker = "evidence"
+embedder = "hashing"
+vector_store = "memory"
+reranker = "noop"
+prompt_builder = "template"
+generator = "extractive"
+evaluator = "deterministic"
+telemetry = "memory"
+
+[limits]
+max_assets = 4
+max_bytes_per_asset = 104857600
+max_documents = 4
+max_parts_per_document = 1024
+max_chunks = 4096
+chunk_chars = 600
+embedding_dimension = 128
+top_k = 3
+max_context_chars = 2400
+max_output_tokens = 160

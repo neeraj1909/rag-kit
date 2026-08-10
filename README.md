@@ -3,11 +3,12 @@
 `rag-kit` is a modular Python foundation for provenance-complete retrieval over
 textual, OCR, layout-aware, vision-language, and time-based documents.
 
-The repository now includes the Phase 2 offline reference pipeline: immutable
-multimodal contracts plus a deterministic, dependency-free vertical slice for
-text, Markdown, HTML, email, and code-like files. The configured CLI can
-inspect a profile, build a process-local index, answer with exact citations,
-and evaluate a JSONL dataset without network access.
+The repository includes five provenance-preserving document families plus a
+dependency-free textual reference pipeline. Phase 3 adds printed OCR,
+layout-aware PDF/PPTX/XLSX extraction, local-only vision/ASR/model seams, a
+pinned CPU Torch embedder, persistent Chroma, and an optional hosted generator.
+The CLI inspects every profile without importing optional SDKs or reading secret
+values.
 
 ## Offline quickstart
 
@@ -24,6 +25,29 @@ uv run ragkit evaluate --config configs/offline.toml \
 The reference vector store is deliberately process-local. `ask` and
 `evaluate` rebuild the configured source in the same process; the CLI reports
 this behavior rather than implying durable persistence.
+
+## Phase 3 profiles
+
+```bash
+uv sync --frozen --extra ocr --extra layout --group dev
+uv run ragkit inspect-config --config configs/ocr.toml
+uv run ragkit ask --config configs/ocr.toml "What is the claim ID?"
+uv run ragkit ask --config configs/layout.toml "What is the standard price?"
+
+# Inspecting model/provider profiles is safe before provisioning.
+uv run ragkit inspect-config --config configs/vision.toml
+uv run ragkit inspect-config --config configs/media.toml
+uv run ragkit inspect-config --config configs/torch-local.toml
+uv run ragkit inspect-config --config configs/persistent.toml
+uv run ragkit inspect-config --config configs/hosted.toml
+```
+
+Model adapters never download weights during construction or inference. Run the
+exact `hf download ... --revision <sha>` action reported by `inspect-config`,
+review the artifact, and then opt into model integration with
+`RAGKIT_RUN_MODEL_INTEGRATION=1`. Hosted calls are opt-in and require the named
+credential environment variable. See `docs/production-adapters.md` and the
+business recipes under `docs/recipes/`.
 
 ## Development baseline
 
@@ -51,7 +75,7 @@ Optional dependency groups are installation boundaries, not implicit
 fallbacks. Install only the family required by a profile; configuration must
 fail explicitly when a requested capability is unavailable.
 
-| Extra | Phase 0 baseline |
+| Extra | Capability |
 |---|---|
 | `text` | Standard-library text, HTML, email, and code-like input |
 | `ocr` | Pillow, pytesseract, and pypdfium2; requires Tesseract/tessdata |

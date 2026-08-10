@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ragkit.adapters import (
+    DeclaredFamilyClassifier,
     FilesystemSourceConnector,
     NoOpDocumentProjector,
     StructureAwareChunker,
@@ -22,6 +23,7 @@ from ragkit.domain import (
 from ragkit.ports import (
     AcquiredAsset,
     ChunkingRequest,
+    DocumentFamily,
     ExtractionRequest,
     ProjectionRequest,
     SourceRequest,
@@ -88,6 +90,42 @@ def test_filesystem_connector_excludes_generated_python_bytecode(tmp_path: Path)
     assets = _acquire(tmp_path)
 
     assert [Path(item.reference.uri or "").name for item in assets] == ["source.py"]
+
+
+@pytest.mark.parametrize(
+    ("name", "media_type"),
+    [
+        ("scan.png", "image/png"),
+        ("photo.jpeg", "image/jpeg"),
+        ("pages.tiff", "image/tiff"),
+        ("report.pdf", "application/pdf"),
+        (
+            "deck.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        (
+            "book.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        ("book.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12"),
+        ("call.wav", "audio/wav"),
+        ("recording.mp3", "audio/mpeg"),
+        ("training.mp4", "video/mp4"),
+        ("clip.webm", "video/webm"),
+    ],
+)
+def test_filesystem_connector_names_phase3_container_media_types(
+    tmp_path: Path, name: str, media_type: str
+) -> None:
+    source = tmp_path / name
+    source.write_bytes(b"synthetic fixture bytes")
+
+    assets = _acquire(source)
+
+    assert assets[0].reference.media_type == media_type
+    if name.endswith(".xlsm"):
+        classification = DeclaredFamilyClassifier(DocumentFamily.LAYOUT).classify(assets)
+        assert classification[0].family is DocumentFamily.LAYOUT
 
 
 @pytest.mark.parametrize(

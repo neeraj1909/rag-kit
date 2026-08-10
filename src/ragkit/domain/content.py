@@ -26,6 +26,7 @@ class RelationKind(StrEnum):
     CONTINUES = "continues"
     CONTAINS = "contains"
     KEYFRAME_OF = "keyframe_of"
+    LABELED_BY = "labeled_by"
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,25 +2,39 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TypeVar
 from urllib.parse import unquote, urlparse
 
 from ragkit.adapters import (
+    ChromaVectorStore,
+    DeclaredFamilyClassifier,
     DeterministicEvaluator,
+    EvidenceChunker,
     ExtractiveGenerator,
     FilesystemSourceConnector,
     HashingEmbedder,
     InMemoryTelemetry,
     InMemoryVectorStore,
+    LayoutDocumentExtractor,
+    LocalFasterWhisperTranscriber,
+    LocalSmolVLMBackend,
+    MediaDocumentExtractor,
+    MixedImageDocumentExtractor,
     NoOpDocumentProjector,
     NoOpReranker,
+    OcrDocumentExtractor,
+    OpenAIHostedGenerator,
+    PySceneDetectBackend,
     StructureAwareChunker,
     TemplatePromptBuilder,
     TextDocumentExtractor,
     TextFamilyClassifier,
+    TorchTextEmbedder,
+    VisionDocumentExtractor,
 )
 from ragkit.application import AnsweringService, IndexingService, RagPipeline
 from ragkit.domain import (
@@ -46,6 +60,7 @@ from ragkit.ports import (
 )
 
 from .config import OfflineProfile
+from .optional import OptionalCapability, inspect_optional_capability
 
 T = TypeVar("T")
 
@@ -102,7 +117,7 @@ def _canonical_filesystem_uri(source_uri: str) -> str:
 
 def _unsupported(role: str, selection: str) -> UnsupportedCapabilityError:
     return UnsupportedCapabilityError(
-        f"Phase 2 does not implement {role} selection {selection!r}",
+        f"ragkit does not implement {role} selection {selection!r}",
         capability=f"{role}:{selection}",
     )
 
@@ -115,44 +130,295 @@ def _select(registry: dict[str, Callable[[], T]], role: str, selection: str) -> 
     return factory()
 
 
+def _validate_family_selections(profile: OfflineProfile) -> None:
+    extractor_matrix: dict[DocumentFamily, str | tuple[str, ...]] = {
+        DocumentFamily.TEXT: "text",
+        DocumentFamily.OCR: "ocr",
+        DocumentFamily.LAYOUT: "layout",
+        DocumentFamily.VISION: ("vision", "mixed_image"),
+        DocumentFamily.MEDIA: "media",
+    }
+    expected_extractor = extractor_matrix[profile.family]
+    expected_classifier = "text" if profile.family is DocumentFamily.TEXT else "declared"
+    expected_chunker = "structure_aware" if profile.family is DocumentFamily.TEXT else "evidence"
+    actual = {
+        "classifier": profile.components.classifier,
+        "extractor": profile.components.extractor,
+        "chunker": profile.components.chunker,
+    }
+    expected = {
+        "classifier": expected_classifier,
+        "extractor": expected_extractor,
+        "chunker": expected_chunker,
+    }
+    mismatch: dict[str, tuple[object, object]] = {}
+    for role, expected_value in expected.items():
+        accepted = expected_value if isinstance(expected_value, tuple) else (expected_value,)
+        if actual[role] not in accepted:
+            mismatch[role] = (expected_value, actual[role])
+    if mismatch:
+        raise UnsupportedCapabilityError(
+            f"component selections do not match {profile.family.value} family: {mismatch}",
+            capability="family_component_matrix",
+        )
+
+
+def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
+    """Describe selected capability requirements without importing optional SDKs."""
+
+    requirements: list[OptionalCapability] = []
+    if profile.family is DocumentFamily.OCR:
+        requirements.extend(
+            (
+                OptionalCapability("ocr", "PIL", distribution="pillow"),
+                OptionalCapability(
+                    "ocr",
+                    "pytesseract",
+                    binary="tesseract",
+                    model=profile.settings.ocr_language,
+                ),
+            )
+        )
+        if profile.source.casefold().endswith(".pdf"):
+            requirements.append(OptionalCapability("ocr", "pypdfium2"))
+    if profile.family is DocumentFamily.LAYOUT:
+        suffix = Path(profile.source).suffix.casefold()
+        layout_module = {
+            ".pdf": "pdfplumber",
+            ".pptx": "pptx",
+            ".xlsx": "openpyxl",
+            ".xlsm": "openpyxl",
+        }.get(suffix, "pdfplumber")
+        distribution = {"pptx": "python-pptx"}.get(layout_module, layout_module)
+        requirements.append(OptionalCapability("layout", layout_module, distribution=distribution))
+    if profile.family is DocumentFamily.VISION:
+        requirements.extend(
+            (
+                OptionalCapability("vision", "PIL", distribution="pillow"),
+                OptionalCapability("vision", "torch"),
+                OptionalCapability(
+                    "vision",
+                    "transformers",
+                    model=(
+                        f"{profile.settings.vision_model_id}@{profile.settings.vision_revision}"
+                    ),
+                ),
+            )
+        )
+        if profile.components.extractor == "mixed_image":
+            requirements.append(
+                OptionalCapability(
+                    "ocr",
+                    "pytesseract",
+                    binary="tesseract",
+                    model=profile.settings.ocr_language,
+                )
+            )
+    if profile.family is DocumentFamily.MEDIA:
+        requirements.extend(
+            (
+                OptionalCapability(
+                    "media",
+                    "faster_whisper",
+                    model=f"{profile.settings.media_model_id}@{profile.settings.media_revision}",
+                ),
+                OptionalCapability("media", "scenedetect"),
+                OptionalCapability("media", "cv2", distribution="opencv-python"),
+            )
+        )
+    if profile.components.embedder == "torch" and not any(
+        item.extra == "vision" for item in requirements
+    ):
+        requirements.extend(
+            (
+                OptionalCapability("vision", "torch"),
+                OptionalCapability(
+                    "vision",
+                    "transformers",
+                    model=(
+                        f"{profile.settings.embedder_model_id}@{profile.settings.embedder_revision}"
+                    ),
+                ),
+            )
+        )
+    if profile.components.vector_store == "chroma":
+        requirements.append(OptionalCapability("persistent", "chromadb"))
+    if profile.components.generator == "openai":
+        requirements.append(
+            OptionalCapability("hosted", "openai", credential_env=profile.settings.credential_env)
+        )
+
+    component_values = asdict(profile.components)
+    selection_fingerprints = {
+        role: str(
+            ComponentFingerprint.create(
+                "component_selection",
+                role,
+                {"selection": selection, "profile": str(profile.fingerprint)},
+            )
+        )
+        for role, selection in component_values.items()
+    }
+    degraded = {
+        DocumentFamily.TEXT: (),
+        DocumentFamily.OCR: ("handwriting_best_effort", "low_confidence_explicit"),
+        DocumentFamily.LAYOUT: ("embedded_images_require_ocr_or_vision",),
+        DocumentFamily.VISION: ("model_descriptions_uncalibrated",),
+        DocumentFamily.MEDIA: ("speaker_identity_unknown", "asr_confidence_unavailable"),
+    }[profile.family]
+    return {
+        "supported_families": [family.value for family in DocumentFamily],
+        "selected_family": profile.family.value,
+        "selection_fingerprints": selection_fingerprints,
+        "device": profile.settings.device,
+        "limits": {
+            **asdict(profile.limits),
+            "adapter": {
+                key: value
+                for key, value in asdict(profile.settings).items()
+                if key.startswith(("ocr_max_", "layout_max_", "vision_max_", "media_max_"))
+                or key.endswith("_timeout_seconds")
+                or key == "timeout_seconds"
+            },
+        },
+        "degraded_modes": list(degraded),
+        "requirements": [asdict(inspect_optional_capability(item)) for item in requirements],
+    }
+
+
 def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
     """Validate one profile and wire its adapters without hidden fallbacks."""
 
-    if profile.family is not DocumentFamily.TEXT:
-        raise _unsupported("family", profile.family.value)
-
+    _validate_family_selections(profile)
     components = profile.components
     connector: SourceConnector = _select(
         {"filesystem": FilesystemSourceConnector}, "connector", components.connector
     )
-    classifier: FamilyClassifier = _select(
-        {"text": TextFamilyClassifier}, "classifier", components.classifier
-    )
-    extractor: DocumentExtractor = _select(
-        {"text": TextDocumentExtractor}, "extractor", components.extractor
-    )
+    classifier_factories: dict[str, Callable[[], FamilyClassifier]] = {
+        "text": TextFamilyClassifier,
+        "declared": lambda: DeclaredFamilyClassifier(profile.family),
+    }
+    classifier = _select(classifier_factories, "classifier", components.classifier)
+    extractor_factories: dict[str, Callable[[], DocumentExtractor]] = {
+        "text": TextDocumentExtractor,
+        "ocr": lambda: OcrDocumentExtractor(
+            language=profile.settings.ocr_language,
+            max_pages=profile.settings.ocr_max_pages,
+            max_pixels=profile.settings.ocr_max_pixels,
+            timeout_seconds=profile.settings.ocr_timeout_seconds,
+        ),
+        "layout": lambda: LayoutDocumentExtractor(
+            max_pages=profile.settings.layout_max_pages,
+            max_slides=profile.settings.layout_max_slides,
+            max_sheets=profile.settings.layout_max_sheets,
+            max_cells=profile.settings.layout_max_cells,
+            max_archive_uncompressed_bytes=profile.settings.layout_max_archive_bytes,
+            max_compression_ratio=profile.settings.layout_max_compression_ratio,
+        ),
+        "vision": lambda: VisionDocumentExtractor(
+            LocalSmolVLMBackend(
+                model_id=profile.settings.vision_model_id,
+                revision=profile.settings.vision_revision,
+                image_longest_edge=profile.settings.vision_image_longest_edge,
+            ),
+            max_new_tokens=profile.settings.vision_max_new_tokens,
+            max_pixels=profile.settings.vision_max_pixels,
+            max_dimension=profile.settings.vision_max_dimension,
+            max_regions=profile.settings.vision_max_regions,
+            timeout_seconds=profile.settings.vision_timeout_seconds,
+        ),
+        "mixed_image": lambda: MixedImageDocumentExtractor(
+            OcrDocumentExtractor(
+                language=profile.settings.ocr_language,
+                max_pages=profile.settings.ocr_max_pages,
+                max_pixels=profile.settings.ocr_max_pixels,
+                timeout_seconds=profile.settings.ocr_timeout_seconds,
+            ),
+            VisionDocumentExtractor(
+                LocalSmolVLMBackend(
+                    model_id=profile.settings.vision_model_id,
+                    revision=profile.settings.vision_revision,
+                    image_longest_edge=profile.settings.vision_image_longest_edge,
+                ),
+                max_new_tokens=profile.settings.vision_max_new_tokens,
+                max_pixels=profile.settings.vision_max_pixels,
+                max_dimension=profile.settings.vision_max_dimension,
+                max_regions=profile.settings.vision_max_regions,
+                timeout_seconds=profile.settings.vision_timeout_seconds,
+            ),
+        ),
+        "media": lambda: MediaDocumentExtractor(
+            transcriber=LocalFasterWhisperTranscriber(
+                model_id=profile.settings.media_model_id,
+                revision=profile.settings.media_revision,
+            ),
+            scene_detector=PySceneDetectBackend(),
+            max_duration_ms=profile.settings.media_max_duration_ms,
+            max_segments=profile.settings.media_max_segments,
+            max_scenes=profile.settings.media_max_scenes,
+            timeout_seconds=profile.settings.media_timeout_seconds,
+        ),
+    }
+    extractor = _select(extractor_factories, "extractor", components.extractor)
     projector: DocumentProjector = _select(
         {"noop": NoOpDocumentProjector}, "projector", components.projector
     )
     chunker = _select(
-        {"structure_aware": lambda: StructureAwareChunker(profile.limits.chunk_chars)},
+        {
+            "structure_aware": lambda: StructureAwareChunker(profile.limits.chunk_chars),
+            "evidence": lambda: EvidenceChunker(profile.limits.chunk_chars),
+        },
         "chunker",
         components.chunker,
     )
     embedder: Embedder = _select(
-        {"hashing": lambda: HashingEmbedder(profile.limits.embedding_dimension)},
+        {
+            "hashing": lambda: HashingEmbedder(profile.limits.embedding_dimension),
+            "torch": lambda: TorchTextEmbedder(
+                model_id=profile.settings.embedder_model_id,
+                revision=profile.settings.embedder_revision,
+                device=profile.settings.device,
+                batch_size=profile.settings.batch_size,
+                max_length=profile.settings.max_length,
+                pooling=profile.settings.pooling,
+            ),
+        },
         "embedder",
         components.embedder,
     )
     vector_store: VectorStore = _select(
-        {"memory": InMemoryVectorStore}, "vector_store", components.vector_store
+        {
+            "memory": InMemoryVectorStore,
+            "chroma": lambda: ChromaVectorStore(
+                profile.settings.persistence_path, profile.settings.collection_name
+            ),
+        },
+        "vector_store",
+        components.vector_store,
     )
     reranker: Reranker = _select({"noop": NoOpReranker}, "reranker", components.reranker)
     prompt_builder: PromptBuilder = _select(
         {"template": TemplatePromptBuilder}, "prompt_builder", components.prompt_builder
     )
+
+    def hosted_generator() -> Generator:
+        credential = os.environ.get(profile.settings.credential_env)
+        if not credential:
+            raise UnsupportedCapabilityError(
+                f"hosted generator requires environment variable {profile.settings.credential_env}",
+                capability="hosted_credential",
+            )
+        return OpenAIHostedGenerator(
+            model=profile.settings.hosted_model,
+            api_key=credential,
+            timeout_seconds=profile.settings.timeout_seconds,
+            max_retries=profile.settings.max_retries,
+        )
+
     generator: Generator = _select(
-        {"extractive": ExtractiveGenerator}, "generator", components.generator
+        {"extractive": ExtractiveGenerator, "openai": hosted_generator},
+        "generator",
+        components.generator,
     )
     evaluator: Evaluator = _select(
         {"deterministic": DeterministicEvaluator}, "evaluator", components.evaluator
