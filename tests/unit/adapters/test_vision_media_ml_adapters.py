@@ -163,6 +163,8 @@ def test_concrete_media_and_vision_backends_require_pinned_revisions() -> None:
         LocalSmolVLMBackend(revision="main")
     with pytest.raises(ValueError, match="immutable 40-character"):
         LocalFasterWhisperTranscriber(revision="main")
+    with pytest.raises(ValueError, match="multiple of 64"):
+        LocalSmolVLMBackend(image_longest_edge=65)
     assert LocalSmolVLMBackend().fingerprint == ComponentFingerprint.create(
         "vision_model",
         "transformers_smolvlm",

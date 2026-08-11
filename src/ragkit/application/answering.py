@@ -125,6 +125,7 @@ class AnsweringService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._retriever,
         )
         self._validate_ranked("retrieval", candidates, request.retrieval_top_k)
         if not candidates:
@@ -138,6 +139,7 @@ class AnsweringService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._reranker,
         )
         self._validate_ranked("reranking", context, request.rerank_top_k)
         candidate_chunks = {item.chunk.chunk_id: item.chunk for item in candidates}
@@ -158,6 +160,8 @@ class AnsweringService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._prompt_builder,
+            count=lambda built: len(built.cited_chunk_ids),
         )
         context_ids = {item.chunk.chunk_id for item in context}
         if len(set(prompt.cited_chunk_ids)) != len(prompt.cited_chunk_ids) or any(
@@ -179,6 +183,8 @@ class AnsweringService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._generator,
+            count=lambda generated: len(generated.cited_chunk_ids),
         )
         if len(set(generation.cited_chunk_ids)) != len(generation.cited_chunk_ids) or any(
             chunk_id not in prompt.cited_chunk_ids for chunk_id in generation.cited_chunk_ids

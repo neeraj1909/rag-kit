@@ -36,6 +36,8 @@ evidence run underneath you:
 
 ```bash
 UV_PROJECT_ENVIRONMENT=/tmp/ragkit-phase4-eval uv sync --group dev
+RAGKIT_RUN_MODEL_INTEGRATION=1 \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 UV_PROJECT_ENVIRONMENT=/tmp/ragkit-phase4-eval uv run python scripts/evaluate_phase4.py \
   --dataset tests/fixtures/evaluation/phase4-text-v1.json \
   --gold-selectors tests/fixtures/evaluation/phase4-text-gold-selectors-v1.json \
@@ -58,19 +60,25 @@ the text, OCR, layout-aware, vision, and media profiles. Missing optional
 modules or missing revision-pinned model caches produce `ineligible` with the
 exact preflight reason. An unexpected execution error or a result that misses
 the fixed relevant ID produces `fail`. Only an actual pipeline result matching
-a fixed label produces `pass`. The bounded deterministic runner keeps vision at
-preflight-only because its pinned model exceeds this runner's resource envelope;
-the opt-in vision integration test is the execution path for that adapter.
+a fixed label produces `pass`. The vision profile uses the reviewed 64-pixel
+fixture envelope and four-token output bound so its pinned CPU model executes
+inside the runner's unchanged 60-second family timeout.
 
-The committed all-extras evidence currently records text and media as passing,
-OCR as failing citation coverage, layout as failing retrieval/locator/citation
-coverage for the business-faithful query, and vision as ineligible under that
-resource policy. Those failures are product evidence, not fixture noise.
+The committed all-extras evidence records text, OCR, layout, vision, and media
+as passing their fixed extraction, retrieval, citation, and locator checks. The
+queries do not contain their gold answers. Separate real-model integration tests
+prove the vision description path and audio/video decoder path; these bounded
+fixtures are not claims of production model accuracy.
 
 This matrix is not a cross-family quality average. Ineligible families stay
 visible, and they are never replaced with synthetic observations or claimed as
 successful. Provision optional extras and pinned local models explicitly before
 requesting evidence for those families.
+
+Model-backed family execution is always opt-in, even when a reviewed revision is
+already cached. Without `RAGKIT_RUN_MODEL_INTEGRATION=1`, those rows remain
+explicitly ineligible; ordinary unit, integration, and coverage runs never start
+model inference merely because a developer machine happens to have a cache.
 
 Each family record includes only sanitized capability fields: extra, module,
 distribution, installed version, binary status, pinned model/revision, cache

@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from conftest import ContractCorpus
-from ragkit.domain import LimitExceededError, PartRelation, RelationKind
+from ragkit.domain import LimitExceededError, OcrContent, PartRelation, RelationKind, TextContent
 from ragkit.ports import ChunkingRequest
 
 pytestmark = pytest.mark.unit
@@ -22,13 +22,13 @@ def test_evidence_chunker_preserves_every_family_part_and_locator(
 
     assert chunks == chunker.chunk(ChunkingRequest((contract_corpus.document,), max_chunks=100))
     assert [chunk.ordinal for chunk in chunks] == list(range(len(chunks)))
-    assert {chunk.source_part_ids[0] for chunk in chunks} == {
+    assert {part_id for chunk in chunks for part_id in chunk.source_part_ids} == {
         part.part_id for part in contract_corpus.document.parts
     }
     parts = {part.part_id: part for part in contract_corpus.document.parts}
     for chunk in chunks:
         part = parts[chunk.source_part_ids[0]]
-        assert chunk.provenance == (part.provenance,)
+        assert chunk.provenance[0] == part.provenance
         assert chunk.document_id == contract_corpus.document.document_id
         assert len(chunk.text) <= 12
         assert chunk.metadata["content_family"] == part.family
@@ -78,3 +78,27 @@ def test_evidence_chunker_projects_source_relationships_for_persistence(
         }
         for relation in related.relations
     ]
+
+
+def test_evidence_chunker_indexes_direct_relation_context_with_all_provenance(
+    contract_corpus: ContractCorpus,
+) -> None:
+    from ragkit.adapters.multimodal import EvidenceChunker
+
+    label = contract_corpus.document.parts[0]
+    value_id = contract_corpus.document.parts[1].part_id
+    value = replace(
+        contract_corpus.document.parts[1],
+        relations=(PartRelation(value_id, label.part_id, RelationKind.LABELED_BY),),
+    )
+    assert isinstance(label, TextContent)
+    assert isinstance(value, OcrContent)
+    document = replace(contract_corpus.document, parts=(label, value))
+
+    chunks = EvidenceChunker(max_chars=1_000).chunk(ChunkingRequest((document,), max_chunks=10))
+    value_chunk = next(item for item in chunks if item.source_part_ids[0] == value_id)
+
+    assert value_chunk.text == f"{label.text} {value.text}"
+    assert value_chunk.source_part_ids == (value.part_id, label.part_id)
+    assert value_chunk.provenance == (value.provenance, label.provenance)
+    assert not any(item.source_part_ids == (label.part_id,) for item in chunks)

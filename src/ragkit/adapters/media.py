@@ -229,7 +229,7 @@ class PySceneDetectBackend:
             )
         except ModuleNotFoundError as error:
             raise MissingDependencyError(
-                "video scenes require the 'media' extra with scenedetect[opencv]"
+                "video scenes require the 'media' extra with scenedetect"
             ) from error
         path = _write_private_media(content, _media_suffix(media_type))
         try:
@@ -237,13 +237,13 @@ class PySceneDetectBackend:
             manager = SceneManager()
             manager.add_detector(ContentDetector(threshold=self._threshold))
             manager.detect_scenes(video, show_progress=False)
-            duration_ms = round(video.duration.get_seconds() * 1000)
+            duration_ms = round(video.duration.seconds * 1000)
             scenes = tuple(
                 RawScene(
-                    round(start.get_seconds() * 1000),
-                    round(end.get_seconds() * 1000),
-                    round(((start.get_seconds() + end.get_seconds()) / 2) * 1000),
-                    (start.get_frames() + end.get_frames()) // 2,
+                    round(start.seconds * 1000),
+                    round(end.seconds * 1000),
+                    round(((start.seconds + end.seconds) / 2) * 1000),
+                    (start.frame_num + end.frame_num) // 2,
                 )
                 for start, end in manager.get_scene_list(start_in_scene=True)
             )

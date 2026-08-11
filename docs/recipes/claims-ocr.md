@@ -55,5 +55,6 @@ best-effort; there is no filename or invented field-value fallback.
 ## Failure modes
 
 Empty/corrupt input, missing Tesseract or language data, unsupported format, timeout,
-and page/pixel limits fail actionably. Checkbox state and form relationships are not
-claimed by the printed-text baseline.
+and page/pixel limits fail actionably. Form mode links an adjacent same-line value to
+its preceding label while retaining both regions, but marks the structure unverified;
+checkbox state and general form understanding are not claimed by this baseline.

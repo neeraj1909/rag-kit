@@ -316,7 +316,7 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
     }
 
 
-def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
+def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) -> OfflineRuntime:
     """Validate one profile and wire its adapters without hidden fallbacks."""
 
     _validate_family_selections(profile)
@@ -333,6 +333,7 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
         "text": TextDocumentExtractor,
         "ocr": lambda: OcrDocumentExtractor(
             language=profile.settings.ocr_language,
+            content_mode=profile.settings.ocr_content_mode,
             max_pages=profile.settings.ocr_max_pages,
             max_pixels=profile.settings.ocr_max_pixels,
             timeout_seconds=profile.settings.ocr_timeout_seconds,
@@ -360,6 +361,7 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
         "mixed_image": lambda: MixedImageDocumentExtractor(
             OcrDocumentExtractor(
                 language=profile.settings.ocr_language,
+                content_mode=profile.settings.ocr_content_mode,
                 max_pages=profile.settings.ocr_max_pages,
                 max_pixels=profile.settings.ocr_max_pixels,
                 timeout_seconds=profile.settings.ocr_timeout_seconds,
@@ -494,7 +496,11 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
     evaluator: Evaluator = _select(
         {"deterministic": DeterministicEvaluator}, "evaluator", components.evaluator
     )
-    telemetry: Telemetry = _select({"memory": InMemoryTelemetry}, "telemetry", components.telemetry)
+    selected_telemetry = (
+        telemetry
+        if telemetry is not None
+        else _select({"memory": InMemoryTelemetry}, "telemetry", components.telemetry)
+    )
 
     indexing = IndexingService(
         connector,
@@ -504,7 +510,7 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
         chunker,
         embedder,
         vector_store,
-        telemetry,
+        selected_telemetry,
         sparse_index=sparse_index,
     )
     answering = AnsweringService(
@@ -512,7 +518,7 @@ def bootstrap(profile: OfflineProfile) -> OfflineRuntime:
         reranker,
         prompt_builder,
         generator,
-        telemetry,
+        selected_telemetry,
     )
     return OfflineRuntime(
         pipeline=RagPipeline(indexing, answering),

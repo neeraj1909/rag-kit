@@ -1,12 +1,12 @@
 [profile]
-name = "ocr-claims"
-family = "ocr"
-source = "tests/fixtures/ocr/printed-claim.png"
+name = "media-video-training"
+family = "media"
+source = "tests/fixtures/media/training.mp4"
 
 [components]
 connector = "filesystem"
 classifier = "declared"
-extractor = "ocr"
+extractor = "media"
 projector = "noop"
 chunker = "evidence"
 embedder = "hashing"
@@ -19,17 +19,13 @@ evaluator = "deterministic"
 telemetry = "memory"
 
 [limits]
-max_assets = 4
-max_bytes_per_asset = 10485760
-max_documents = 4
-max_parts_per_document = 4096
+max_assets = 1
+max_bytes_per_asset = 104857600
+max_documents = 1
+max_parts_per_document = 1024
 max_chunks = 4096
 chunk_chars = 600
 embedding_dimension = 128
-top_k = 3
+top_k = 5
 max_context_chars = 2400
 max_output_tokens = 160
-
-[settings]
-ocr_language = "eng"
-ocr_content_mode = "form"

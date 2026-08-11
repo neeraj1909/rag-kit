@@ -9,13 +9,17 @@ import pytest
 
 from ragkit.adapters import (
     LocalFasterWhisperTranscriber,
+    LocalSmolVLMBackend,
     MediaDocumentExtractor,
     PySceneDetectBackend,
     TorchTextEmbedder,
+    VisionDocumentExtractor,
 )
 from ragkit.domain import (
     AssetRef,
+    BoxLocator,
     ComponentFingerprint,
+    ImageContent,
     KeyframeLocator,
     RelationKind,
     TimeSpanLocator,
@@ -56,6 +60,44 @@ def test_reviewed_cached_cpu_transformer_is_repeatable() -> None:
     for left, right in zip(first.embeddings, second.embeddings, strict=True):
         assert left.values == pytest.approx(right.values, abs=1e-7)
         assert math.sqrt(sum(value * value for value in left.values)) == pytest.approx(1.0)
+
+
+@pytest.mark.integration
+@pytest.mark.modality_integration
+def test_reviewed_vision_backend_generates_region_linked_evidence() -> None:
+    if os.environ.get("RAGKIT_RUN_MODEL_INTEGRATION") != "1":
+        pytest.skip("explicit reviewed model provisioning is required")
+    path = Path("tests/fixtures/vision/equipment.png").resolve()
+    content = path.read_bytes()
+    reference = AssetRef(
+        "equipment",
+        "image/png",
+        sha256(content).hexdigest(),
+        path.as_uri(),
+        len(content),
+    )
+    classification = AssetClassification(
+        reference.asset_id,
+        DocumentFamily.VISION,
+        1.0,
+        ComponentFingerprint.create("classifier", "fixture", {"version": 1}),
+    )
+    document = VisionDocumentExtractor(
+        LocalSmolVLMBackend(image_longest_edge=64),
+        max_new_tokens=4,
+        timeout_seconds=60.0,
+    ).extract(ExtractionRequest((AcquiredAsset(reference, content),), (classification,), 1))[0]
+
+    assert len(document.parts) == 1
+    part = document.parts[0]
+    assert isinstance(part, ImageContent)
+    assert part.description.strip()
+    assert part.provenance.locator == BoxLocator(0, 0.0, 0.0, 1.0, 1.0)
+    assert {notice.code for notice in part.provenance.notices} == {
+        "confidence_unavailable",
+        "model_derived",
+        "untrusted_description",
+    }
 
 
 @pytest.mark.integration

@@ -9,6 +9,30 @@ permissions:
   contents: read
 
 jobs:
+  release-archives:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Build wheel and source distribution
+        run: uv build --no-sources
+      - name: Inspect release metadata and archive contents
+        run: |
+          wheel=$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)
+          sdist=$(find dist -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
+          uv run python scripts/check_package.py \
+            --wheel "$wheel" --sdist "$sdist" \
+            --extra text --extra ocr --extra layout --extra vision \
+            --extra media --extra persistent --extra hosted --extra http --extra reranking
+      - name: Upload release archives
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-archives
+          path: dist/
+
   quality:
     runs-on: ubuntu-latest
     strategy:
@@ -16,8 +40,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
@@ -46,35 +70,84 @@ jobs:
         run: timeout 60 uv run pytest -m integration --no-cov
       - name: End-to-end tests
         run: timeout 60 uv run pytest -m e2e --no-cov
-      - name: Coverage
-        run: uv run pytest -m 'unit or contract' --no-cov
 
   optional-extras:
+    needs: release-archives
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-        extra: [ocr, layout, vision, media, persistent, hosted, reranking]
+        extra: [text, ocr, layout, vision, media, persistent, hosted, http, reranking]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-      - name: Install Tesseract for OCR
-        if: matrix.extra == 'ocr'
-        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
-      - name: Install one locked optional boundary
-        run: uv sync --frozen --group dev --extra ${{ matrix.extra }}
-      - name: Verify optional boundary
-        run: timeout 180 uv run pytest --no-cov
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-archives
+          path: dist
+      - name: Install one published optional boundary
+        run: |
+          uv venv --python ${{ matrix.python-version }} .venv-release
+          wheel=$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)
+          uv pip install --python .venv-release/bin/python "${wheel}[${{ matrix.extra }}]"
+      - name: Import optional boundary without provider or model work
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+        run: |
+          timeout 180 .venv-release/bin/python scripts/check_extra.py \
+            --extra ${{ matrix.extra }} \
+            --output reports/install/${{ matrix.python-version }}-${{ matrix.extra }}.json
+      - name: Verify HTTP console entry point
+        if: matrix.extra == 'http'
+        run: .venv-release/bin/ragkit-http --help
+      - name: Upload install-profile evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: install-${{ matrix.extra }}-python-${{ matrix.python-version }}
+          path: reports/install/${{ matrix.python-version }}-${{ matrix.extra }}.json
+
+  core-archives:
+    needs: release-archives
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-archives
+          path: dist
+      - name: Install core wheel without optional dependencies
+        run: |
+          uv venv --python ${{ matrix.python-version }} .venv-wheel
+          wheel=$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)
+          uv pip install --python .venv-wheel/bin/python "$wheel"
+      - name: Verify wheel import and missing-extra diagnostics
+        run: .venv-wheel/bin/python scripts/check_core_install.py
+      - name: Install source archive without optional dependencies
+        run: |
+          uv venv --python ${{ matrix.python-version }} .venv-sdist
+          sdist=$(find dist -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
+          uv pip install --python .venv-sdist/bin/python "$sdist"
+      - name: Verify source-archive import and missing-extra diagnostics
+        run: .venv-sdist/bin/python scripts/check_core_install.py
 
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
           python-version: "3.12"
@@ -94,7 +167,7 @@ jobs:
             --output reports/benchmarks/ci-offline-text.json
           uv run python -c "from pathlib import Path; from ragkit.evaluation.benchmark import BenchmarkResult; BenchmarkResult.from_json(Path('reports/benchmarks/ci-offline-text.json').read_text())"
       - name: Upload benchmark evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: phase4-benchmark-python-3.12
           path: reports/benchmarks/ci-offline-text.json

@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
 
-from ragkit.domain import InvalidDomainValueError
-from ragkit.ports import Telemetry, TelemetryEvent, TelemetryOutcome
+from ragkit.domain import ComponentFingerprint, InvalidDomainValueError
+from ragkit.ports import Telemetry, TelemetryAttribute, TelemetryEvent, TelemetryOutcome
 
 T = TypeVar("T")
 
@@ -44,20 +44,71 @@ def invoke_timed(
     telemetry: Telemetry,
     clock: Callable[[], int],
     timings: list[StageTiming],
+    *,
+    component: object,
+    count: Callable[[T], int] | None = None,
 ) -> T:
-    """Run one injected capability and record content-free timing metadata."""
+    """Run one injected capability and record bounded operational metadata."""
 
     started_ns = clock()
+    fingerprint = _component_fingerprint(component)
     try:
         result = call()
-    except Exception:
+    except Exception as error:
         finished_ns = clock()
-        event = TelemetryEvent(operation, started_ns, finished_ns, TelemetryOutcome.ERROR)
+        event = TelemetryEvent(
+            operation,
+            started_ns,
+            finished_ns,
+            TelemetryOutcome.ERROR,
+            _attributes(fingerprint, 0, _error_category(error)),
+        )
         telemetry.record(event)
         timings.append(StageTiming(operation, finished_ns - started_ns, event.outcome))
         raise
     finished_ns = clock()
-    event = TelemetryEvent(operation, started_ns, finished_ns, TelemetryOutcome.SUCCESS)
+    event = TelemetryEvent(
+        operation,
+        started_ns,
+        finished_ns,
+        TelemetryOutcome.SUCCESS,
+        _attributes(
+            fingerprint,
+            _result_count(result) if count is None else count(result),
+            "none",
+        ),
+    )
     telemetry.record(event)
     timings.append(StageTiming(operation, finished_ns - started_ns, event.outcome))
     return result
+
+
+def _component_fingerprint(component: object) -> ComponentFingerprint:
+    declared = getattr(component, "fingerprint", None)
+    if isinstance(declared, ComponentFingerprint):
+        return declared
+    implementation = f"{type(component).__module__}.{type(component).__qualname__}"
+    return ComponentFingerprint.create("runtime_component", implementation, {"identity_version": 1})
+
+
+def _result_count(result: object) -> int:
+    if isinstance(result, tuple):
+        return len(result)
+    return 0 if result is None else 1
+
+
+def _error_category(error: Exception) -> str:
+    module = type(error).__module__
+    if module.startswith("ragkit."):
+        return type(error).__name__
+    return "unexpected_error"
+
+
+def _attributes(
+    fingerprint: ComponentFingerprint, result_count: int, error_category: str
+) -> tuple[TelemetryAttribute, ...]:
+    return (
+        TelemetryAttribute("component_fingerprint", str(fingerprint)),
+        TelemetryAttribute("result_count", result_count),
+        TelemetryAttribute("error_category", error_category),
+    )

@@ -22,6 +22,7 @@ dependencies = []
 
 [project.scripts]
 ragkit = "ragkit.cli.main:main"
+ragkit-http = "ragkit.delivery.server:main"
 
 [project.optional-dependencies]
 text = []
@@ -43,10 +44,11 @@ vision = [
 ]
 media = [
   "faster-whisper>=1.2,<2",
-  "scenedetect[opencv]>=0.6.7,<0.7",
+  "scenedetect>=0.7.1,<0.8",
 ]
 persistent = ["chromadb>=1,<2"]
 hosted = ["openai>=2,<3"]
+http = ["uvicorn>=0.35,<1"]
 reranking = [
   "torch>=2.7,<3",
   "transformers>=4.57,<6",

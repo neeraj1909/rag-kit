@@ -19,8 +19,9 @@ interpreter during take-home assignments.
   MIT as the repository license.
 - Keep `project.dependencies` empty in Phase 0. Publish independently selectable
   extras named `text`, `ocr`, `layout`, `vision`, `media`, `persistent`, and
-  `hosted`, and `reranking`; keep test/lint/type/build tooling in the local `dev` dependency
-  group.
+  `hosted`, `http`, and `reranking`; keep test/lint/type/build tooling in the local
+  `dev` dependency group. The `http` extra installs the Uvicorn serving process;
+  the ASGI application itself remains dependency-free.
 - Use uv 0.9.22 for the initial resolution workflow and commit the universal
   `uv.lock`. The lockfile, not version prose, owns exact Python package
   resolution. Updating it requires the relevant clean-install and contract
@@ -87,3 +88,4 @@ Python minors adds CI work but catches compatibility drift before adapters ship.
 - [Architecture overview](../../ARCHITECTURE.md)
 - [ADR 0004: modality adapter baselines](0004-modality-adapter-baselines.md)
 - [Modality support matrix](../modality-support.md)
+- [Release packaging validation](../release-packaging.md)

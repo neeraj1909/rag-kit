@@ -320,14 +320,14 @@ wheels = [
 
 [[package]]
 name = "click"
-version = "8.2.1"
+version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/60/6c/8ca2efa64cf75a977a0d7fac081354553ebe483345c734fb6b6515d96bbc/click-8.2.1.tar.gz", hash = "sha256:27c491cc05d968d271d5a1db13e3b5a184636d9d930f148c50b038f0d0646202", size = 286342, upload-time = "2025-05-20T23:19:49.832Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/d4/81420972a676e8ffea40450d8c8c92943e7218a78fe9b64359836cc9876b/click-8.4.2.tar.gz", hash = "sha256:9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6", size = 338000, upload-time = "2026-06-24T17:45:15.148Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/32/10bb5764d90a8eee674e9dc6f4db6a0ab47c8c4d0d83c27f7c39ac415a4d/click-8.2.1-py3-none-any.whl", hash = "sha256:61a3265b914e850b85317d0b3109c7f8cd35a670f963866005d6ef1d5175a12b", size = 102215, upload-time = "2025-05-20T23:19:47.796Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/e2/79c688af8b210d232694e31e59da9f6ec747bae31c3f5946e4e9b98860d5/click-8.4.2-py3-none-any.whl", hash = "sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76", size = 119243, upload-time = "2026-06-24T17:45:13.73Z" },
 ]
 
 [[package]]
@@ -2081,6 +2081,9 @@ source = { editable = "." }
 hosted = [
     { name = "openai" },
 ]
+http = [
+    { name = "uvicorn" },
+]
 layout = [
     { name = "openpyxl" },
     { name = "pdfplumber" },
@@ -2088,7 +2091,7 @@ layout = [
 ]
 media = [
     { name = "faster-whisper" },
-    { name = "scenedetect", extra = ["opencv"] },
+    { name = "scenedetect" },
 ]
 ocr = [
     { name = "pillow" },
@@ -2131,14 +2134,15 @@ requires-dist = [
     { name = "pypdfium2", marker = "extra == 'ocr'", specifier = ">=4.30,<5" },
     { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.13,<0.4" },
     { name = "python-pptx", marker = "extra == 'layout'", specifier = ">=1.0,<2" },
-    { name = "scenedetect", extras = ["opencv"], marker = "extra == 'media'", specifier = ">=0.6.7,<0.7" },
+    { name = "scenedetect", marker = "extra == 'media'", specifier = ">=0.7.1,<0.8" },
     { name = "torch", marker = "extra == 'reranking'", specifier = ">=2.7,<3" },
     { name = "torch", marker = "extra == 'vision'", specifier = ">=2.7,<3" },
     { name = "torchvision", marker = "extra == 'vision'", specifier = ">=0.22,<1" },
     { name = "transformers", marker = "extra == 'reranking'", specifier = ">=4.57,<6" },
     { name = "transformers", marker = "extra == 'vision'", specifier = ">=4.57,<6" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.35,<1" },
 ]
-provides-extras = ["text", "ocr", "layout", "vision", "media", "persistent", "hosted", "reranking"]
+provides-extras = ["text", "ocr", "layout", "vision", "media", "persistent", "hosted", "http", "reranking"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2346,23 +2350,19 @@ wheels = [
 
 [[package]]
 name = "scenedetect"
-version = "0.6.7.1"
+version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "opencv-python" },
     { name = "platformdirs" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/b4/e77e1812ae89bc4864ff54efb6a8232eabebd471e372096cb711f03cca52/scenedetect-0.6.7.1.tar.gz", hash = "sha256:07833b0cb83a0106786a88136462580e9865e097f411f01501a688714c483a4e", size = 164208, upload-time = "2025-09-25T03:18:59.929Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/b8/a111612a976c80c76f3a4372514d0a66b6200badd43c6dce57c55de0b0bb/scenedetect-0.7.1.tar.gz", hash = "sha256:2bc082056f231d35f9d5eed6d8077a5d417c77c2787d965d7f03be3802cb6f7f", size = 263670, upload-time = "2026-07-22T02:57:10.255Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/5b/2294ea44b3b2264a50b82a55a3822837a04cb779c873fc168844f36f5b46/scenedetect-0.6.7.1-py3-none-any.whl", hash = "sha256:3808ef4436ab0fc6fee8a155e95759b42e2446c925c45746a82ff119be4eb3e1", size = 130860, upload-time = "2025-09-25T03:18:58.43Z" },
-]
-
-[package.optional-dependencies]
-opencv = [
-    { name = "opencv-python" },
+    { url = "https://files.pythonhosted.org/packages/b8/a2/938555bc170ee504ecf33f328dc838b40c3b887d58bf4ee8beefb6c33fd8/scenedetect-0.7.1-py3-none-any.whl", hash = "sha256:91b67902275b2e0d29a12f6d70435f04e0bd7852a6dc8a69c901c6069328dffa", size = 146194, upload-time = "2026-07-22T02:57:05.239Z" },
 ]
 
 [[package]]

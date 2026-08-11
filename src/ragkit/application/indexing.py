@@ -150,6 +150,7 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._connector,
         )
         if not assets:
             return self._omitted(request.manifest, 0, 0, "acquisition", "no_assets", timings)
@@ -160,6 +161,7 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._classifier,
         )
         asset_ids = tuple(asset.reference.asset_id for asset in assets)
         classified_ids = tuple(item.asset_id for item in classifications)
@@ -174,6 +176,7 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._extractor,
         )
         if not documents:
             return self._omitted(
@@ -194,6 +197,7 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._projector,
         )
         self._require_preserved_projection(documents, projected)
 
@@ -203,6 +207,7 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._chunker,
         )
         if not chunks:
             return self._omitted(
@@ -223,6 +228,8 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._embedder,
+            count=lambda batch: len(batch.embeddings),
         )
         upsert = UpsertRequest(chunks, embeddings, request.manifest)
         invoke_timed(
@@ -231,6 +238,8 @@ class IndexingService:
             self._telemetry,
             self._clock,
             timings,
+            component=self._vector_store,
+            count=lambda _result: len(chunks),
         )
         sparse_index = self._sparse_index
         if sparse_index is not None:
@@ -240,6 +249,8 @@ class IndexingService:
                 self._telemetry,
                 self._clock,
                 timings,
+                component=sparse_index,
+                count=lambda _result: len(chunks),
             )
         return IndexingResult(
             request.manifest,

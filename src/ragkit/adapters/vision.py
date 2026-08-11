@@ -91,10 +91,12 @@ class LocalSmolVLMBackend:
             from ragkit.domain import InvalidDomainValueError
 
             raise InvalidDomainValueError("vision revision must be an immutable 40-character SHA")
-        if image_longest_edge <= 0 or image_longest_edge > 2048:
+        if image_longest_edge <= 0 or image_longest_edge > 2048 or image_longest_edge % 64 != 0:
             from ragkit.domain import InvalidDomainValueError
 
-            raise InvalidDomainValueError("vision inference image edge must be in [1, 2048]")
+            raise InvalidDomainValueError(
+                "vision inference image edge must be a multiple of 64 in [64, 2048]"
+            )
         self._model_id = model_id
         self._revision = revision
         self._image_longest_edge = image_longest_edge
@@ -145,6 +147,10 @@ class LocalSmolVLMBackend:
                 "revision explicitly before constructing the backend"
             ) from error
         self._model.eval()
+        patch_size = int(self._model.config.vision_config.patch_size)
+        scale_factor = int(self._model.config.scale_factor)
+        patches_per_side = self._image_longest_edge // patch_size
+        self._processor.image_seq_len = (patches_per_side // scale_factor) ** 2
         self._loaded = True
 
     @property
@@ -183,6 +189,7 @@ class LocalSmolVLMBackend:
             return_tensors="pt",
             do_image_splitting=False,
             size={"longest_edge": self._image_longest_edge},
+            max_image_size={"longest_edge": self._image_longest_edge},
         ).to("cpu")
         with self._torch.inference_mode():
             generated = self._model.generate(**inputs, max_new_tokens=max_new_tokens)

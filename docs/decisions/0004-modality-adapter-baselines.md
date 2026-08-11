@@ -31,7 +31,7 @@ boundary:
 | `ocr` | Pillow + `pytesseract` + `pypdfium2` | Tesseract executable and reviewed `tessdata` language files |
 | `layout` | `pdfplumber` + `python-pptx` + `openpyxl` | None in the baseline; encrypted inputs require caller credentials |
 | `vision` | PyTorch/Transformers image-to-text | Cached, revision-pinned `HuggingFaceTB/SmolVLM-256M-Instruct` weights |
-| `media` | `faster-whisper` CPU/int8 ASR + `scenedetect[opencv]` scenes/keyframes | Cached, inventoried converted Whisper model; no system `ffmpeg` executable for the baseline path |
+| `media` | `faster-whisper` CPU/int8 ASR + `scenedetect` scenes/keyframes | Cached, inventoried converted Whisper model; no system `ffmpeg` executable for the baseline path |
 
 Every adapter returns normalized typed parts, asset identity/digest, exact locators,
 extractor/model identity, raw confidence signals where the engine has them, and

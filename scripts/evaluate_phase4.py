@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import platform
 import subprocess
 import sys
@@ -296,6 +297,9 @@ def _unmet_requirement(requirements: list[dict[str, object]]) -> str | None:
         return "optional modules unavailable: " + ", ".join(missing)
     if uncached:
         return "revision-pinned local model unavailable: " + ", ".join(uncached)
+    selected_models = [str(item["model"]) for item in requirements if item.get("model")]
+    if selected_models and os.environ.get("RAGKIT_RUN_MODEL_INTEGRATION") != "1":
+        return "local model execution is opt-in: set RAGKIT_RUN_MODEL_INTEGRATION=1"
     return None
 
 

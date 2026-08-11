@@ -106,14 +106,17 @@ def test_runner_records_unavailable_families_without_fabricating_passes(
         env=environment,
     )
 
+    assert "Traceback" not in completed.stderr, completed.stderr
+    assert (output / "five-family-execution-v1.json").is_file(), completed.stderr
     matrix = json.loads((output / "five-family-execution-v1.json").read_text())
     has_failure = any(item["status"] == "fail" for item in matrix["families"].values())
     assert completed.returncode == int(has_failure), completed.stderr
     assert set(matrix["families"]) == {"text", "ocr", "layout", "vision", "media"}
     assert matrix["families"]["text"]["status"] == "pass"
-    assert matrix["families"]["vision"]["status"] in {"ineligible", "fail"}
-    assert matrix["families"]["media"]["status"] in {"pass", "ineligible", "fail"}
-    assert matrix["families"]["layout"]["status"] in {"ineligible", "fail"}
+    assert matrix["families"]["ocr"]["status"] in {"pass", "ineligible"}
+    assert matrix["families"]["layout"]["status"] in {"pass", "ineligible"}
+    assert matrix["families"]["vision"]["status"] == "ineligible"
+    assert matrix["families"]["media"]["status"] == "ineligible"
     assert all(
         matrix["families"][name]["evidence"]
         for name in ("text", "ocr", "layout", "vision", "media")
@@ -135,8 +138,21 @@ def test_runner_records_unavailable_families_without_fabricating_passes(
     )
     assert matrix["families"]["text"]["metrics"]["retrieval_recall"]["value"] == 1.0
     assert matrix["families"]["text"]["metrics"]["extraction_coverage"]["value"] == 1.0
-    if matrix["families"]["media"]["status"] == "pass":
-        assert matrix["families"]["media"]["family_specific"]["timestamp_linkage"] is True
+    for family in ("ocr", "layout"):
+        if matrix["families"][family]["status"] == "pass":
+            assert all(
+                metric["value"] == 1.0 for metric in matrix["families"][family]["metrics"].values()
+            )
+    for family in ("vision", "media"):
+        evidence = matrix["families"][family]["evidence"]
+        assert any(
+            marker in evidence
+            for marker in (
+                "RAGKIT_RUN_MODEL_INTEGRATION=1",
+                "optional modules unavailable",
+                "revision-pinned local model unavailable",
+            )
+        )
         assert all(
-            metric["value"] == 1.0 for metric in matrix["families"]["media"]["metrics"].values()
+            metric["value"] is None for metric in matrix["families"][family]["metrics"].values()
         )

@@ -14,6 +14,7 @@ from ragkit.domain import (
     LimitExceededError,
     MediaContent,
     OcrContent,
+    RelationKind,
     TextContent,
 )
 from ragkit.ports import Chunker, ChunkingRequest
@@ -43,8 +44,29 @@ class EvidenceChunker(Chunker):
         chunks: list[Chunk] = []
         for document in request.documents:
             ordinal = 0
+            parts_by_id = {part.part_id: part for part in document.parts}
+            referenced_labels = {
+                relation.target_part_id
+                for candidate in document.parts
+                for relation in candidate.relations
+                if relation.kind is RelationKind.LABELED_BY
+            }
             for part in document.parts:
-                representation = _representation(part)
+                if part.part_id in referenced_labels:
+                    continue
+                related_ids = tuple(
+                    dict.fromkeys(
+                        relation.target_part_id
+                        for relation in part.relations
+                        if relation.target_part_id in parts_by_id
+                        and relation.target_part_id != part.part_id
+                    )
+                )
+                related_parts = tuple(parts_by_id[identifier] for identifier in related_ids)
+                evidence_parts = (part, *related_parts)
+                representation = " ".join(
+                    (*(_representation(item) for item in related_parts), _representation(part))
+                )
                 for text in _segments(representation, self._max_chars):
                     metadata = dict(document.metadata)
                     metadata["content_family"] = part.family
@@ -66,14 +88,17 @@ class EvidenceChunker(Chunker):
                             ChunkId.from_content(
                                 document.document_id,
                                 self.fingerprint,
-                                ((part.part_id, part.provenance.locator),),
+                                tuple(
+                                    (item.part_id, item.provenance.locator)
+                                    for item in evidence_parts
+                                ),
                                 text,
                             ),
                             document.document_id,
                             ordinal,
                             text,
-                            (part.provenance,),
-                            (part.part_id,),
+                            tuple(item.provenance for item in evidence_parts),
+                            tuple(item.part_id for item in evidence_parts),
                             metadata,
                         )
                     )

@@ -601,7 +601,19 @@ def test_indexing_sequences_every_family_through_manifest_checked_upsert(
     ]
     assert all(event.outcome is TelemetryOutcome.SUCCESS for event in telemetry.events)
     assert all(event.finished_ns > event.started_ns for event in telemetry.events)
-    assert all(event.attributes == () for event in telemetry.events)
+    assert all(
+        {attribute.name for attribute in event.attributes}
+        == {"component_fingerprint", "result_count", "error_category"}
+        for event in telemetry.events
+    )
+    assert all(
+        next(item.value for item in event.attributes if item.name == "error_category") == "none"
+        for event in telemetry.events
+    )
+    assert all(
+        next(item.value for item in event.attributes if item.name == "result_count") == 1
+        for event in telemetry.events
+    )
 
 
 def test_indexing_updates_sparse_index_with_the_same_chunks_and_manifest() -> None:
@@ -708,7 +720,9 @@ def test_indexing_propagates_capability_errors_and_records_sanitized_error_timin
     event = telemetry.events[-1]
     assert event.operation == "index.extract"
     assert event.outcome is TelemetryOutcome.ERROR
-    assert event.attributes == ()
+    assert {item.name: item.value for item in event.attributes}[
+        "error_category"
+    ] == "UnsupportedCapabilityError"
     assert "customer-secret" not in str(event)
 
 
@@ -956,7 +970,9 @@ def test_answering_records_generation_exceptions_without_content_attributes() ->
     assert caught.value is error
     assert telemetry.events[-1].operation == "ask.generate"
     assert telemetry.events[-1].outcome is TelemetryOutcome.ERROR
-    assert telemetry.events[-1].attributes == ()
+    assert {item.name: item.value for item in telemetry.events[-1].attributes}[
+        "error_category"
+    ] == "UnsupportedCapabilityError"
     assert "private question" not in str(telemetry.events[-1])
 
 

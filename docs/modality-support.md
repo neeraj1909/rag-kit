@@ -88,7 +88,7 @@ and deleted after processing.
 - `vision` contains Pillow, PyTorch, and Transformers. Package licenses do not grant
   rights to arbitrary downloaded weights. The selected SmolVLM model card currently
   identifies Apache-2.0; configuration must pin a reviewed immutable revision.
-- `media` contains `faster-whisper` and `scenedetect[opencv]`. Faster-whisper is MIT
+- `media` contains `faster-whisper` and `scenedetect`. Faster-whisper is MIT
   and documents PyAV-bundled FFmpeg libraries, so an `ffmpeg` executable is not a
   baseline requirement for transcription. PySceneDetect's splitting helpers may
   require external FFmpeg, but rag-kit only performs detection/keyframe extraction.

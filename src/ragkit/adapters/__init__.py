@@ -14,7 +14,7 @@ from .layout import LayoutDocumentExtractor
 from .media import LocalFasterWhisperTranscriber, MediaDocumentExtractor, PySceneDetectBackend
 from .mixed import MixedImageDocumentExtractor
 from .multimodal import EvidenceChunker
-from .observability import InMemoryTelemetry
+from .observability import InMemoryTelemetry, JsonLinesTelemetry, RequestCorrelatedTelemetry
 from .ocr import OcrDocumentExtractor
 from .retrieval import (
     BM25Config,
@@ -50,6 +50,7 @@ __all__ = [
     "HybridRetriever",
     "InMemoryTelemetry",
     "InMemoryVectorStore",
+    "JsonLinesTelemetry",
     "LayoutDocumentExtractor",
     "LocalCrossEncoderReranker",
     "LocalFasterWhisperTranscriber",
@@ -61,6 +62,7 @@ __all__ = [
     "OcrDocumentExtractor",
     "OpenAIHostedGenerator",
     "PySceneDetectBackend",
+    "RequestCorrelatedTelemetry",
     "StructureAwareChunker",
     "TemplatePromptBuilder",
     "TextDocumentExtractor",

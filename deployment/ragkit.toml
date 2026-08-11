@@ -1,16 +1,16 @@
 [profile]
-name = "vision-equipment"
-family = "vision"
-source = "tests/fixtures/vision/equipment.png"
+name = "container-persistent"
+family = "text"
+source = "/data/corpus"
 
 [components]
 connector = "filesystem"
-classifier = "declared"
-extractor = "vision"
+classifier = "text"
+extractor = "text"
 projector = "noop"
-chunker = "evidence"
+chunker = "structure_aware"
 embedder = "hashing"
-vector_store = "memory"
+vector_store = "chroma"
 retriever = "dense"
 reranker = "noop"
 prompt_builder = "template"
@@ -19,9 +19,9 @@ evaluator = "deterministic"
 telemetry = "memory"
 
 [limits]
-max_assets = 4
-max_bytes_per_asset = 10485760
-max_documents = 4
+max_assets = 32
+max_bytes_per_asset = 1048576
+max_documents = 32
 max_parts_per_document = 256
 max_chunks = 1024
 chunk_chars = 600
@@ -31,6 +31,6 @@ max_context_chars = 2400
 max_output_tokens = 160
 
 [settings]
-vision_image_longest_edge = 64
-vision_max_new_tokens = 4
-vision_timeout_seconds = 60.0
+persistence_path = "/var/lib/ragkit/chroma"
+collection_name = "ragkit"
+device = "cpu"

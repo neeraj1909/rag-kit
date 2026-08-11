@@ -60,6 +60,7 @@ class AdapterSettings:
     """Explicit optional-adapter settings; credential values are never stored here."""
 
     ocr_language: str = "eng"
+    ocr_content_mode: str = "printed"
     ocr_max_pages: int = 25
     ocr_max_pixels: int = 20_000_000
     ocr_timeout_seconds: float = 30.0
@@ -128,6 +129,7 @@ class AdapterSettings:
             raise InvalidDomainValueError("BM25 numeric settings must be finite numbers")
         strings = (
             self.ocr_language,
+            self.ocr_content_mode,
             self.persistence_path,
             self.collection_name,
             self.embedder_model_id,
@@ -142,6 +144,8 @@ class AdapterSettings:
             raise InvalidDomainValueError("adapter string settings must not be blank")
         if type(self.bm25_lowercase) is not bool:
             raise InvalidDomainValueError("bm25_lowercase must be a boolean")
+        if self.ocr_content_mode not in {"printed", "handwriting", "form"}:
+            raise InvalidDomainValueError("ocr_content_mode must be printed, handwriting, or form")
         try:
             re.compile(self.bm25_token_pattern)
         except re.error as error:
@@ -321,6 +325,9 @@ def load_config(path: str | Path) -> OfflineProfile:
         defaults = AdapterSettings()
         settings = AdapterSettings(
             ocr_language=cast(str, raw_settings.get("ocr_language", defaults.ocr_language)),
+            ocr_content_mode=cast(
+                str, raw_settings.get("ocr_content_mode", defaults.ocr_content_mode)
+            ),
             ocr_max_pages=cast(int, raw_settings.get("ocr_max_pages", defaults.ocr_max_pages)),
             ocr_max_pixels=cast(int, raw_settings.get("ocr_max_pixels", defaults.ocr_max_pixels)),
             ocr_timeout_seconds=cast(

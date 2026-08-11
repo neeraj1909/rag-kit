@@ -10,7 +10,7 @@
     },
     "ocr": {
       "profile": "configs/ocr.toml",
-      "query": "What claim identifier is printed?",
+      "query": "What is the claim ID?",
       "relevant_evidence_id": "ocr:claim-id",
       "source_sha256": "47df6281f9cdab264aa7433c94e9424dbc6380d4505d3f53c8647f304ace6186",
       "locator": {"kind": "box", "page": 0, "x0": 0.239, "y0": 0.286, "x1": 0.363, "y1": 0.338}
@@ -25,11 +25,16 @@
     "vision": {
       "profile": "configs/vision.toml",
       "query": "What equipment is shown?",
-      "execution_policy": "preflight_only",
-      "ineligible_reason": "revision-pinned vision execution exceeds the deterministic runner resource envelope; use the opt-in modality integration test",
-      "relevant_evidence_id": null,
+      "relevant_evidence_id": "vision:equipment-image",
       "source_sha256": "dd0dd30512f226f7ac2c0284001a41715450da11c58e3254c4d43f6b45ded651",
-      "locator": null
+      "locator": {
+        "kind": "box",
+        "page": 0,
+        "x0": 0.0,
+        "y0": 0.0,
+        "x1": 1.0,
+        "y1": 1.0
+      }
     },
     "media": {
       "profile": "configs/media.toml",

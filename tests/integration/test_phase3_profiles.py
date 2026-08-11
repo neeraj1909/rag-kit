@@ -112,11 +112,18 @@ def test_mixed_profile_wires_configured_ocr_bounds(monkeypatch: pytest.MonkeyPat
     assert calls == [
         {
             "language": "eng",
+            "content_mode": "printed",
             "max_pages": 3,
             "max_pixels": 123_456,
             "timeout_seconds": 7.0,
         }
     ]
+
+
+def test_ocr_profile_selects_explicit_form_semantics() -> None:
+    profile = load_config("configs/ocr.toml")
+
+    assert profile.settings.ocr_content_mode == "form"
 
 
 def test_cli_reports_persistent_store_truthfully(

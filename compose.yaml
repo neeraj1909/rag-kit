@@ -1,0 +1,41 @@
+name: rag-kit
+
+services:
+  ragkit:
+    image: rag-kit:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      RAGKIT_CONFIG: /app/config/ragkit.toml
+      RAGKIT_HOST: 0.0.0.0
+      RAGKIT_PORT: "8000"
+    ports:
+      - "127.0.0.1:${RAGKIT_PORT:-8000}:8000"
+    volumes:
+      - ./deployment/ragkit.toml:/app/config/ragkit.toml:ro
+      - ./tests/fixtures/corpus:/data/corpus:ro
+      - ragkit-data:/var/lib/ragkit
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/ragkit-health
+        - --url
+        - http://127.0.0.1:8000/readyz
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    stop_grace_period: 15s
+
+volumes:
+  ragkit-data:
