@@ -57,6 +57,8 @@ class DocumentFamily(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SourceRequest:
+    """Bound one acquisition address by asset count and bytes per complete asset."""
+
     source_uri: str
     max_assets: int
     max_bytes_per_asset: int
@@ -69,6 +71,8 @@ class SourceRequest:
 
 @dataclass(frozen=True, slots=True)
 class AcquiredAsset:
+    """Pair complete acquired bytes with the immutable reference to their source."""
+
     reference: AssetRef
     content: bytes
 
@@ -81,6 +85,8 @@ class AcquiredAsset:
 
 @dataclass(frozen=True, slots=True)
 class AssetClassification:
+    """Record one family decision, its optional confidence, and classifier identity."""
+
     asset_id: str
     family: DocumentFamily
     confidence: float | None
@@ -96,6 +102,8 @@ class AssetClassification:
 
 @dataclass(frozen=True, slots=True)
 class ExtractionRequest:
+    """Align acquired assets and classifications under a document-count bound."""
+
     assets: tuple[AcquiredAsset, ...]
     classifications: tuple[AssetClassification, ...]
     max_documents: int
@@ -110,6 +118,8 @@ class ExtractionRequest:
 
 @dataclass(frozen=True, slots=True)
 class ProjectionRequest:
+    """Request evidence-preserving projections under a per-document part bound."""
+
     documents: tuple[Document, ...]
     max_parts_per_document: int
 
@@ -119,6 +129,8 @@ class ProjectionRequest:
 
 @dataclass(frozen=True, slots=True)
 class ChunkingRequest:
+    """Request ordered chunks from documents without allowing silent truncation."""
+
     documents: tuple[Document, ...]
     max_chunks: int
 
@@ -128,6 +140,8 @@ class ChunkingRequest:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingRequest:
+    """Carry an ordered, possibly empty batch of non-blank text representations."""
+
     texts: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -137,6 +151,8 @@ class EmbeddingRequest:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingBatch:
+    """Bind aligned, equal-width embeddings to the component that produced them."""
+
     embeddings: tuple[Embedding, ...]
     embedder: ComponentFingerprint
 
@@ -148,6 +164,8 @@ class EmbeddingBatch:
 
 @dataclass(frozen=True, slots=True)
 class UpsertRequest:
+    """Bind aligned chunks and embeddings to the manifest they must satisfy."""
+
     chunks: tuple[Chunk, ...]
     embeddings: EmbeddingBatch
     manifest: IndexManifest
@@ -163,6 +181,8 @@ class UpsertRequest:
 
 @dataclass(frozen=True, slots=True)
 class VectorSearchRequest:
+    """Describe one bounded dense search under explicit index compatibility rules."""
+
     embedding: Embedding
     embedder: ComponentFingerprint
     top_k: int
@@ -176,12 +196,16 @@ class VectorSearchRequest:
 
 @dataclass(frozen=True, slots=True)
 class DeleteRequest:
+    """Name chunk identities to delete under an expected compatible manifest."""
+
     chunk_ids: tuple[ChunkId, ...]
     expected_manifest: IndexManifest
 
 
 @dataclass(frozen=True, slots=True)
 class SparseUpsertRequest:
+    """Bind unique provenance-complete chunks to one sparse-index manifest."""
+
     chunks: tuple[Chunk, ...]
     manifest: IndexManifest
 
@@ -193,6 +217,8 @@ class SparseUpsertRequest:
 
 @dataclass(frozen=True, slots=True)
 class RetrievalRequest:
+    """Describe one non-blank bounded query with optional provider-neutral filters."""
+
     query: str
     top_k: int
     expected_manifest: IndexManifest
@@ -205,6 +231,8 @@ class RetrievalRequest:
 
 @dataclass(frozen=True, slots=True)
 class RerankRequest:
+    """Request a bounded rescore of unique candidates without admitting new chunks."""
+
     query: str
     candidates: tuple[ScoredChunk, ...]
     top_k: int
@@ -219,6 +247,8 @@ class RerankRequest:
 
 @dataclass(frozen=True, slots=True)
 class PromptRequest:
+    """Bind a query and ranked evidence to a strict prompt-context character budget."""
+
     query: str
     context: tuple[ScoredChunk, ...]
     max_context_chars: int
@@ -230,6 +260,8 @@ class PromptRequest:
 
 @dataclass(frozen=True, slots=True)
 class Prompt:
+    """Carry rendered prompt text and the exact chunk identities it authorizes."""
+
     text: str
     cited_chunk_ids: tuple[ChunkId, ...]
 
@@ -239,6 +271,8 @@ class Prompt:
 
 @dataclass(frozen=True, slots=True)
 class GenerationRequest:
+    """Bind an authorized prompt and evidence to explicit generation controls."""
+
     query: str
     context: tuple[ScoredChunk, ...]
     prompt: Prompt
@@ -257,6 +291,8 @@ class GenerationRequest:
 
 @dataclass(frozen=True, slots=True)
 class TokenUsage:
+    """Report non-negative provider token counts without estimating missing usage."""
+
     input_tokens: int
     output_tokens: int
 
@@ -267,6 +303,8 @@ class TokenUsage:
 
 @dataclass(frozen=True, slots=True)
 class GenerationResult:
+    """Return answer text, actual citations, model identity, and optional usage."""
+
     answer: str
     cited_chunk_ids: tuple[ChunkId, ...]
     model: ComponentFingerprint
@@ -275,6 +313,8 @@ class GenerationResult:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationExample:
+    """Define one stable query and its relevant evidence labels for evaluation."""
+
     example_id: str
     query: str
     relevant_chunk_ids: tuple[ChunkId, ...]
@@ -287,6 +327,8 @@ class EvaluationExample:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationCase:
+    """Pair an evaluation example with already-observed retrieval and generation."""
+
     example: EvaluationExample
     retrieved: tuple[ScoredChunk, ...]
     generated: GenerationResult | None = None
@@ -294,6 +336,8 @@ class EvaluationCase:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationRequest:
+    """Bind non-empty observed cases to the evaluator fingerprint interpreting them."""
+
     cases: tuple[EvaluationCase, ...]
     evaluator: ComponentFingerprint
 
@@ -304,6 +348,8 @@ class EvaluationRequest:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationMetric:
+    """Store one finite value under a named, externally documented metric definition."""
+
     name: str
     value: float
 
@@ -315,11 +361,15 @@ class EvaluationMetric:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationReport:
+    """Return named metrics and ordered case identities without provider payloads."""
+
     metrics: tuple[EvaluationMetric, ...]
     evaluated_case_ids: tuple[str, ...]
 
 
 class TelemetryOutcome(StrEnum):
+    """Classify a recorded operation as successful, failed, or explicitly partial."""
+
     SUCCESS = "success"
     ERROR = "error"
     PARTIAL = "partial"
@@ -327,6 +377,8 @@ class TelemetryOutcome(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TelemetryAttribute:
+    """Carry one bounded scalar operational attribute, never raw document content."""
+
     name: str
     value: str | int | float | bool | None
 
@@ -338,6 +390,8 @@ class TelemetryAttribute:
 
 @dataclass(frozen=True, slots=True)
 class TelemetryEvent:
+    """Describe one monotonic operation interval and its sanitized bounded metadata."""
+
     operation: str
     started_ns: int
     finished_ns: int

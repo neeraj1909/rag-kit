@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
 
 from ragkit.domain import InvalidDomainValueError
 from ragkit.infrastructure.config import AdapterSettings
-from ragkit.infrastructure.optional import OptionalCapability, inspect_optional_capability
+from ragkit.infrastructure.optional import (
+    OptionalCapability,
+    _credential_is_present,
+    inspect_optional_capability,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -43,6 +48,26 @@ def test_inspection_reports_credential_presence_without_exposing_value(
     assert result.installed is True
     assert result.credential == "configured"
     assert "sk-secret-value" not in repr(result)
+
+
+def test_inspection_checks_credential_presence_without_reading_value() -> None:
+    class PresenceOnlyEnvironment(Mapping[str, str]):
+        def __contains__(self, key: object) -> bool:
+            return key == "OPENAI_API_KEY"
+
+        def __getitem__(self, key: str) -> str:
+            raise AssertionError("credential value access is forbidden during inspection")
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(("OPENAI_API_KEY",))
+
+        def __len__(self) -> int:
+            return 1
+
+    environment = PresenceOnlyEnvironment()
+
+    assert _credential_is_present("OPENAI_API_KEY", environment)
+    assert not _credential_is_present("MISSING", environment)
 
 
 def test_inspection_reports_binary_and_model_state(monkeypatch: pytest.MonkeyPatch) -> None:

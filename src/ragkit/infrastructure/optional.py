@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -35,6 +36,12 @@ class CapabilityInspection:
     version: str | None
 
 
+def _credential_is_present(name: str, environment: Mapping[str, str] | None = None) -> bool:
+    """Check membership without retrieving the credential value."""
+
+    return name in (os.environ if environment is None else environment)
+
+
 def _model_cache_state(model: str | None) -> tuple[bool | None, str | None]:
     if model is None or "@" not in model or "/" not in model:
         return None, None
@@ -62,7 +69,7 @@ def inspect_optional_capability(capability: OptionalCapability) -> CapabilityIns
         "not-required"
         if capability.credential_env is None
         else "configured"
-        if os.environ.get(capability.credential_env)
+        if _credential_is_present(capability.credential_env)
         else f"missing:{capability.credential_env}"
     )
     binary = (

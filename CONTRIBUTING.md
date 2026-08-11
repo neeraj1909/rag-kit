@@ -13,7 +13,7 @@ uv sync --frozen --group dev
 
 ## Authoritative quality checks
 
-Run the same non-mutating commands used by CI:
+Run the core, non-mutating checks used by CI:
 
 ```bash
 uv lock --check
@@ -23,11 +23,32 @@ uv run mypy src tests
 uv run python -m compileall -q src tests
 uv run python -c "import ragkit"
 uv run python scripts/check_imports.py
+uv run python scripts/check_readme.py
 timeout 60 uv run pytest -m unit --no-cov
 timeout 60 uv run pytest -m contract --no-cov
 timeout 60 uv run pytest -m integration --no-cov
 timeout 60 uv run pytest -m e2e --no-cov
-uv run pytest --cov=ragkit --cov-report=term-missing
+```
+
+The comprehensive 80% coverage gate requires Tesseract 5.x with English
+language data in addition to all locked Python extras. Its first run may update
+the project environment with those Python extras:
+
+```bash
+tesseract --version
+tesseract --list-langs | rg '^eng$'
+uv run --frozen --all-extras pytest --cov=ragkit --cov-report=term-missing
+```
+
+Model downloads and paid provider calls remain disabled.
+
+For the Phase 5 user-facing evidence, execute the copied README quickstart and
+validate the assignment templates without writing a destination:
+
+```bash
+uv run python scripts/check_readme.py --execute
+uv run python scripts/bootstrap_assignment.py --template local-offline \
+  --destination /tmp/ragkit-assignment-preview --dry-run
 ```
 
 During implementation, apply automatic formatting and safe lint fixes with:

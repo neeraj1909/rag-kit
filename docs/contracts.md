@@ -75,3 +75,19 @@ Compliance includes exact provenance survival, aligned embedding dimensions,
 manifest validation before store work, idempotent upsert/delete, canonical score
 ordering, bounded outputs, typed capability failure, and absence of provider
 objects from public values.
+
+## Extending a boundary
+
+An implementation inherits every guarantee in its port docstring. Its adapter
+docstring and recipe must narrow the remaining uncertainty: concrete formats and
+limits, external effects, state and thread safety, determinism conditions, the exact
+meaning of confidence or scores, whether fallback exists, and typed failure modes.
+Configuration is a validated schema in `infrastructure/config.py`; selection is an
+explicit factory in `infrastructure/bootstrap.py`. Provider option dictionaries,
+runtime dynamic imports from configuration, and undocumented fallbacks are not public
+extension mechanisms.
+
+The executable procedure and a contract-tested example live in
+[`extension-guide.md`](extension-guide.md). Contract helpers are deliberately shared
+between fakes and concrete adapters so a new implementation is judged by observable
+behavior rather than inheritance alone.
