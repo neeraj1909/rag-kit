@@ -11,8 +11,8 @@ selected or raises a typed, actionable error without a fallback.
 | `vision` | Cached immutable SmolVLM revision, CPU eval/inference only | Pixel/dimension/output/region limits plus a 60-second deadline; model instance is not declared thread-safe | Descriptions are model-derived, untrusted, and uncalibrated |
 | `media` | Cached immutable faster-whisper revision and deterministic scene midpoint | 30-minute, segment, scene, and two-hour operation limits; engines are not declared thread-safe | No diarization; speaker identity and ASR confidence remain unknown |
 | `torch` | Cached immutable encoder revision, eval/inference, explicit batching/pooling/L2 | Batch/max-length/device settings; model instance is not declared thread-safe | No implicit downloads or GPU fallback |
-| `chroma` | Persistent local SDK I/O with manifest preflight and cosine distance conversion | Request `top_k`; collection instance follows Chroma concurrency semantics | No implicit migration/reset; incompatible indexes fail |
-| `openai` | Explicit network call with bounded SDK timeout/retry settings | Request output limit; SDK client concurrency semantics | Mocked by default; no live-quality or availability claim |
+| `sqlite` | Standard-library local database with transactional manifest preflight and exact JSON row decoding | Request `top_k`; SQLite serializes writers while reads use independent connections | Exact cosine search scans the bounded profile index; no implicit migration/reset |
+| `openai` | Explicit network call with bounded SDK timeout/retry settings | Request output limit; SDK client concurrency semantics | Mocked by default; one double-opt-in paid smoke exists, but no live-quality or availability claim |
 
 `ragkit inspect-config` reports the five supported families, selected component
 fingerprints, device, limits, degraded modes, optional extras/binaries,
@@ -36,3 +36,21 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
   RAGKIT_RUN_MODEL_INTEGRATION=1 \
   uv run pytest -m modality_integration --no-cov
 ```
+
+## Hosted live smoke
+
+Mocked tests own request bounds, citation sanitization, timeout/retry wiring, and
+redacted error translation. A real provider reachability check is deliberately
+separate because it reads a credential, opens a network connection, and may incur
+cost. It is collected but skipped unless both gates are present:
+
+```bash
+RAGKIT_RUN_LIVE=1 OPENAI_API_KEY="$OPENAI_API_KEY" \
+  uv run --frozen --extra hosted pytest -m live \
+  tests/live/test_openai_hosted_live.py --no-cov -q
+```
+
+The smoke makes one Responses API request with zero retries, an eight-token output
+cap, and a 30-second timeout. Passing proves bounded adapter reachability for the
+selected model at that moment; it does not prove quality, uptime, or future model
+compatibility. Routine CI never enables it.

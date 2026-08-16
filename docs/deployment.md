@@ -1,7 +1,7 @@
 # Container deployment
 
 The supported container is a CPU-only, offline-first HTTP deployment. It installs
-only the `http` and `persistent` extras, runs as UID/GID `65532`, drops Linux
+only the `http` extra (SQLite persistence is standard-library), runs as UID/GID `65532`, drops Linux
 capabilities, and uses a read-only root filesystem. The published port binds to
 loopback by default; put an authenticated reverse proxy in front of it before
 exposing it outside one machine.
@@ -14,7 +14,7 @@ The Compose service deliberately separates operator input from runtime state:
 |---|---|---|
 | `/app/config/ragkit.toml` | read-only bind mount | exact, secret-free runtime profile |
 | `/data/corpus` | read-only bind mount | source documents visible to the connector |
-| `/var/lib/ragkit` | writable named volume | Chroma index and manifest state |
+| `/var/lib/ragkit` | writable named volume | SQLite index and manifest state |
 | `/tmp` | bounded tmpfs | transient framework files |
 
 `deployment/ragkit.toml` uses absolute container paths. Changing the corpus,
@@ -28,19 +28,16 @@ Hosted credentials are not part of this baseline. If a later deployment enables
 a hosted adapter, inject its credential at runtime through the platform's secret
 facility; never add it to the image, Compose file, or TOML profile.
 
-## Chroma advisory boundary
+## Persistent-store security boundary
 
-The locked `chromadb` package is covered by
-[GHSA-f4j7-r4q5-qw2c](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c),
-which has no patched Python release as of 2026-08-11. The vulnerable surface is
-Chroma's unauthenticated FastAPI collection endpoint accepting a model repository
-and `trust_remote_code`. This deployment does not start or publish that server:
-rag-kit uses an in-process `PersistentClient`, creates a fixed cosine collection,
-and exposes only its own exact-schema API. No request field can select a Chroma
-model repository or `trust_remote_code` value. Do not add a Chroma server port or
-run its Python FastAPI command. Re-run the dependency audit and upgrade as soon as
-a reviewed patched release exists; this boundary is a mitigation, not a claim that
-the installed distribution is vulnerability-free.
+The supported image uses Python's standard-library SQLite adapter and contains no
+Chroma package or server. This removes the affected surface described by
+[GHSA-f4j7-r4q5-qw2c](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c)
+rather than relying on network containment. The SQLite file path is fixed by the
+read-only profile and is never accepted from an HTTP request. Operators must not
+mount an untrusted pre-existing database: stored manifests, chunks, and vectors
+are validated, but filesystem ownership and database provenance remain deployment
+responsibilities.
 
 ## Clean build and readiness
 

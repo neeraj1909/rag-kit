@@ -10,7 +10,7 @@ extractor = "text"
 projector = "noop"
 chunker = "structure_aware"
 embedder = "hashing"
-vector_store = "chroma"
+vector_store = "sqlite"
 retriever = "dense"
 reranker = "noop"
 prompt_builder = "template"
@@ -31,6 +31,6 @@ max_context_chars = 2400
 max_output_tokens = 160
 
 [settings]
-persistence_path = "/var/lib/ragkit/chroma"
+persistence_path = "/var/lib/ragkit/index.sqlite3"
 collection_name = "ragkit"
 device = "cpu"

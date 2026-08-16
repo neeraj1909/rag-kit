@@ -13,7 +13,7 @@ WORKDIR /build
 RUN python -m pip install "uv==${UV_VERSION}"
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
-RUN uv sync --frozen --no-dev --extra http --extra persistent --no-editable
+RUN uv sync --frozen --no-dev --extra http --no-editable
 
 FROM ${PYTHON_IMAGE} AS runtime
 

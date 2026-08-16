@@ -15,7 +15,6 @@ MISSING_BOUNDARIES = {
     "layout": "openpyxl",
     "vision": "transformers",
     "media": "faster_whisper",
-    "persistent": "chromadb",
     "hosted": "openai",
     "http": "uvicorn",
     "reranking": "transformers",

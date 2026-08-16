@@ -14,7 +14,7 @@ decisions. The first Phase 0 `uv.lock` is now the authoritative Python-package
 resolution for CPython 3.11–3.12. Direct resolved baselines are Pillow 12.3.0,
 `pytesseract` 0.3.13, `pypdfium2` 4.30.0, `pdfplumber` 0.11.9,
 `python-pptx` 1.0.2, `openpyxl` 3.1.5, PyTorch 2.13.0, Transformers 5.14.1,
-`faster-whisper` 1.2.1, PySceneDetect 0.6.7.1, Chroma 1.5.9, and OpenAI 2.53.0.
+`faster-whisper` 1.2.1, PySceneDetect 0.7.1, standard-library SQLite, and OpenAI 2.53.0.
 These versions do not lock external Tesseract/tessdata, model weights, native
 codec/runtime policy, or fixture licenses. Do not infer an exact API from an
 unpinned URL, and do not advance the lock without rerunning adapter contracts

@@ -10,7 +10,7 @@ extractor = "text"
 projector = "noop"
 chunker = "structure_aware"
 embedder = "hashing"
-vector_store = "chroma"
+vector_store = "sqlite"
 retriever = "hybrid"
 reranker = "noop"
 prompt_builder = "template"
@@ -31,7 +31,7 @@ max_context_chars = 2400
 max_output_tokens = 160
 
 [settings]
-persistence_path = ".ragkit/chroma"
+persistence_path = ".ragkit/index.sqlite3"
 collection_name = "assignment"
 hosted_model = "gpt-5-mini"
 credential_env = "OPENAI_API_KEY"

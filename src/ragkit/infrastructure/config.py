@@ -70,7 +70,7 @@ class AdapterSettings:
     layout_max_cells: int = 100_000
     layout_max_archive_bytes: int = 256 * 1024 * 1024
     layout_max_compression_ratio: float = 100.0
-    persistence_path: str = ".ragkit/chroma"
+    persistence_path: str = ".ragkit/index.sqlite3"
     collection_name: str = "ragkit"
     embedder_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedder_revision: str = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"

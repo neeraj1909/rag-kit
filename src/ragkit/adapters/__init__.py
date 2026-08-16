@@ -1,6 +1,5 @@
 """Dependency-light concrete adapters for the deterministic offline profile."""
 
-from .chroma_store import ChromaVectorStore
 from .classification import DeclaredFamilyClassifier
 from .cross_encoder_reranker import (
     DEFAULT_RERANKER_MODEL_ID,
@@ -25,6 +24,7 @@ from .retrieval import (
     InMemoryVectorStore,
     NoOpReranker,
 )
+from .sqlite_store import SQLiteVectorStore
 from .textual import (
     NoOpDocumentProjector,
     StructureAwareChunker,
@@ -39,7 +39,6 @@ __all__ = [
     "DEFAULT_RERANKER_MODEL_REVISION",
     "BM25Config",
     "BM25Retriever",
-    "ChromaVectorStore",
     "DeclaredFamilyClassifier",
     "DenseRetriever",
     "DeterministicEvaluator",
@@ -63,6 +62,7 @@ __all__ = [
     "OpenAIHostedGenerator",
     "PySceneDetectBackend",
     "RequestCorrelatedTelemetry",
+    "SQLiteVectorStore",
     "StructureAwareChunker",
     "TemplatePromptBuilder",
     "TextDocumentExtractor",

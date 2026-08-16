@@ -1,6 +1,6 @@
 # ADR 0003: Retrieval score and Chroma baseline
 
-- Status: Accepted
+- Status: Superseded for persistent-store selection by [ADR 0006](0006-sqlite-persistent-store.md); score semantics remain Accepted
 - Date: 2026-08-09
 
 ## Context

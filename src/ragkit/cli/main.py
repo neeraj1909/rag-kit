@@ -177,7 +177,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
     source = _source(args, profile)
     index_result = _index(runtime, profile, source)
     if args.command == "index":
-        persistent = profile.components.vector_store == "chroma"
+        persistent = profile.components.vector_store == "sqlite"
         return {
             "profile": profile.name,
             "documents": index_result.document_count,
@@ -209,7 +209,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "config_fingerprint": str(profile.fingerprint),
             "index_mode": (
                 "persistent_upserted_in_process"
-                if profile.components.vector_store == "chroma"
+                if profile.components.vector_store == "sqlite"
                 else "rebuilt_in_process"
             ),
             "timings_ms": timings,

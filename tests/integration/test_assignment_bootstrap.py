@@ -45,7 +45,7 @@ def run_bootstrap(
     ("template", "vector_store", "generator"),
     (
         ("local-offline", "memory", "extractive"),
-        ("hosted-persistent", "chroma", "openai"),
+        ("hosted-persistent", "sqlite", "openai"),
     ),
 )
 def test_assignment_templates_are_complete_and_config_valid(

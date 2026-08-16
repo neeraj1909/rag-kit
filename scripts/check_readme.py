@@ -29,7 +29,7 @@ SYMBOL_LINK = re.compile(r"\[`([A-Za-z_][A-Za-z0-9_]*)`\]\(([^)#]+\.py)(?:#[^)]+
 REQUIRED_IMPLEMENTATIONS = frozenset(
     {
         "BM25Retriever",
-        "ChromaVectorStore",
+        "SQLiteVectorStore",
         "DeclaredFamilyClassifier",
         "DenseRetriever",
         "DeterministicEvaluator",

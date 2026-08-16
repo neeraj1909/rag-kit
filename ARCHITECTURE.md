@@ -119,11 +119,11 @@ normally keep their direction; distances reverse it (for example `-distance`).
 Canonical relevance is an ordering value, not a promise of probability or
 cross-retriever calibration.
 
-Chroma is the first persistent vector-store baseline, but it is reachable only
-through the vector-store port and adapter. Its exact client calls, supported
-filters, persistence API, and returned score shape are version-dependent SDK
-details to lock when the adapter is implemented. They do not leak into the core
-contract. See [ADR 0003: Retrieval score and persistent-store semantics](docs/decisions/0003-retrieval-score-and-chroma-baseline.md).
+SQLite is the supported persistent vector-store baseline, reachable only through
+the vector-store port and adapter. Its transaction, row encoding, filter, and
+score behavior do not leak into the core contract. ADR 0003 still owns canonical
+score semantics; [ADR 0006](docs/decisions/0006-sqlite-persistent-store.md)
+supersedes its initial Chroma selection after an unpatched critical advisory.
 
 ## Architectural invariants
 
@@ -142,7 +142,7 @@ contract. See [ADR 0003: Retrieval score and persistent-store semantics](docs/de
 7. Native scores remain diagnosable and are never treated as interchangeable
    across metrics or retrieval stages.
 8. Persistent-store choice is replaceable through composition; no core type or
-   use case names Chroma.
+   use case names SQLite.
 
 ## Validation implications
 
@@ -165,9 +165,10 @@ contract. See [ADR 0003: Retrieval score and persistent-store semantics](docs/de
 
 - [ADR 0001: Functional core and synchronous ports](docs/decisions/0001-functional-core-and-sync-first-ports.md)
 - [ADR 0002: Stable identity and index compatibility](docs/decisions/0002-stable-identity-and-index-compatibility.md)
-- [ADR 0003: Retrieval score and Chroma baseline](docs/decisions/0003-retrieval-score-and-chroma-baseline.md)
+- [ADR 0003: Retrieval score and initial Chroma baseline](docs/decisions/0003-retrieval-score-and-chroma-baseline.md)
 - [ADR 0004: Modality adapter baselines](docs/decisions/0004-modality-adapter-baselines.md)
 - [ADR 0005: Python packaging and tooling baseline](docs/decisions/0005-python-packaging-and-tooling.md)
+- [ADR 0006: SQLite persistent store](docs/decisions/0006-sqlite-persistent-store.md)
 
 [cosmic-repository]: https://www.cosmicpython.com/book/chapter_02_repository.html
 [cosmic-abstractions]: https://www.cosmicpython.com/book/chapter_03_abstractions.html

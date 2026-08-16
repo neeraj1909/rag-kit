@@ -42,6 +42,21 @@ uv run --frozen --all-extras pytest --cov=ragkit --cov-report=term-missing
 
 Model downloads and paid provider calls remain disabled.
 
+The hosted-provider smoke is collected but skipped by default. It makes exactly
+one bounded paid request only when an operator separately supplies both the
+credential and explicit opt-in flag:
+
+```bash
+RAGKIT_RUN_LIVE=1 OPENAI_API_KEY="$OPENAI_API_KEY" \
+  uv run --frozen --extra hosted pytest -m live \
+  tests/live/test_openai_hosted_live.py --no-cov -q
+```
+
+Optionally set `RAGKIT_LIVE_OPENAI_MODEL` to another reviewed Responses API
+model. Do not run this command in routine CI, and never print or persist the
+credential. Test presence/skip behavior without a paid call by omitting
+`RAGKIT_RUN_LIVE`.
+
 For the Phase 5 user-facing evidence, execute the copied README quickstart and
 validate the assignment templates without writing a destination:
 

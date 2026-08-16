@@ -129,14 +129,12 @@ def test_ocr_profile_selects_explicit_form_semantics() -> None:
 def test_cli_reports_persistent_store_truthfully(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    pytest.importorskip("chromadb")
     source = Path("configs/persistent.toml").read_text()
     config = tmp_path / "persistent.toml"
-    config.write_text(source.replace(".ragkit/chroma", str(tmp_path / "chroma")))
+    config.write_text(source.replace(".ragkit/index.sqlite3", str(tmp_path / "index.sqlite3")))
 
     profile = load_config(config)
-    requirement = cast(list[dict[str, object]], inspect_profile(profile)["requirements"])[0]
-    assert requirement["version"] is not None
+    assert cast(list[dict[str, object]], inspect_profile(profile)["requirements"]) == []
 
     assert main(["index", "--config", str(config)]) == 0
     result = json.loads(capsys.readouterr().out)

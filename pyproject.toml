@@ -46,7 +46,7 @@ media = [
   "faster-whisper>=1.2,<2",
   "scenedetect>=0.7.1,<0.8",
 ]
-persistent = ["chromadb>=1,<2"]
+persistent = []
 hosted = ["openai>=2,<3"]
 http = ["uvicorn>=0.35,<1"]
 reranking = [

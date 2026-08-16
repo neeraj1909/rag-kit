@@ -1,8 +1,8 @@
 # Hosted generation with persistent retrieval
 
 Use this template when the assessment permits a hosted answer model and needs a
-local index that survives process restarts. Chroma stores the index under
-`.ragkit/chroma`; OpenAI credentials are read from `OPENAI_API_KEY` only at
+local index that survives process restarts. SQLite stores the index under
+`.ragkit/index.sqlite3`; OpenAI credentials are read from `OPENAI_API_KEY` only at
 composition and are never stored in this profile.
 
 1. Install `uv sync --frozen --group dev --extra persistent --extra hosted`.

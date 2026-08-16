@@ -12,7 +12,6 @@ from urllib.parse import unquote, urlparse
 from ragkit.adapters import (
     BM25Config,
     BM25Retriever,
-    ChromaVectorStore,
     DeclaredFamilyClassifier,
     DenseRetriever,
     DeterministicEvaluator,
@@ -34,6 +33,7 @@ from ragkit.adapters import (
     OcrDocumentExtractor,
     OpenAIHostedGenerator,
     PySceneDetectBackend,
+    SQLiteVectorStore,
     StructureAwareChunker,
     TemplatePromptBuilder,
     TextDocumentExtractor,
@@ -248,8 +248,6 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
                 ),
             )
         )
-    if profile.components.vector_store == "chroma":
-        requirements.append(OptionalCapability("persistent", "chromadb"))
     if profile.components.reranker == "cross-encoder":
         requirements.extend(
             (
@@ -421,7 +419,7 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
     vector_store: VectorStore = _select(
         {
             "memory": InMemoryVectorStore,
-            "chroma": lambda: ChromaVectorStore(
+            "sqlite": lambda: SQLiteVectorStore(
                 profile.settings.persistence_path, profile.settings.collection_name
             ),
         },

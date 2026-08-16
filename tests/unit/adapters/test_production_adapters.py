@@ -1,34 +1,20 @@
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, replace
-from pathlib import Path
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
 
 from conftest import ContractCorpus
-from ragkit.adapters.chroma_store import ChromaVectorStore
 from ragkit.adapters.hosted import OpenAIHostedGenerator
-from ragkit.adapters.retrieval import HashingEmbedder
 from ragkit.domain import (
-    Comparison,
-    ComparisonOperator,
-    IndexCompatibilityError,
-    IntegrityError,
     MissingDependencyError,
-    NormalizationMode,
-    Not,
     ProviderError,
-    UnsupportedCapabilityError,
 )
 from ragkit.ports import (
-    EmbeddingRequest,
     GenerationRequest,
     Prompt,
     TokenUsage,
-    UpsertRequest,
-    VectorSearchRequest,
 )
 
 pytestmark = pytest.mark.unit
@@ -61,40 +47,6 @@ class _Responses:
 class _Client:
     def __init__(self, response: _Response | Exception) -> None:
         self.responses = _Responses(response)
-
-
-class _Collection:
-    def __init__(
-        self,
-        metadata: dict[str, object],
-        query_result: dict[str, object] | None = None,
-    ) -> None:
-        self.metadata = metadata
-        self.configuration = {"hnsw": {"space": "cosine"}}
-        self.query_result = query_result or {"ids": [[]], "metadatas": [[]], "distances": [[]]}
-        self.query_calls = 0
-        self.upsert_calls = 0
-
-    def upsert(self, **kwargs: object) -> None:
-        self.upsert_calls += 1
-
-    def query(self, **kwargs: object) -> dict[str, object]:
-        self.query_calls += 1
-        return self.query_result
-
-    def delete(self, **kwargs: object) -> None:
-        raise AssertionError("delete was not expected")
-
-
-class _ChromaClient:
-    def __init__(self, collection: _Collection) -> None:
-        self.collection = collection
-
-    def get_collection(self, name: str, **kwargs: object) -> _Collection:
-        return self.collection
-
-    def create_collection(self, name: str, **kwargs: object) -> _Collection:
-        raise AssertionError("create was not expected")
 
 
 def _request(contract_corpus: ContractCorpus) -> GenerationRequest:
@@ -190,133 +142,3 @@ def test_hosted_generator_passes_timeout_and_retry_policy_to_sdk(
     generator.generate(_request(contract_corpus))
 
     assert constructor_calls == [{"api_key": "sk-key", "timeout": 7.5, "max_retries": 1}]
-
-
-def test_chroma_preflights_manifest_before_provider_query_or_upsert(
-    contract_corpus: ContractCorpus,
-) -> None:
-    embedder = HashingEmbedder(32)
-    manifest = replace(
-        contract_corpus.manifest,
-        embedder_fingerprint=embedder.fingerprint,
-        embedding_dimension=32,
-        normalization=NormalizationMode.L2,
-    )
-    incompatible = replace(manifest, schema_version=2)
-    collection = _Collection(
-        {
-            "ragkit_manifest_v1": json.dumps(manifest.to_dict()),
-            "ragkit_metric": "cosine",
-        }
-    )
-    store = ChromaVectorStore(Path("unused"), "test-collection", client=_ChromaClient(collection))
-    chunk = contract_corpus.chunks[0]
-    batch = embedder.embed_documents(EmbeddingRequest((chunk.text,)))
-
-    with pytest.raises(IndexCompatibilityError, match="schema_version"):
-        store.upsert(UpsertRequest((chunk,), batch, incompatible))
-    with pytest.raises(IndexCompatibilityError, match="schema_version"):
-        store.search(
-            VectorSearchRequest(
-                embedder.embed_query("alpha"), embedder.fingerprint, 1, None, incompatible
-            )
-        )
-    assert collection.upsert_calls == 0
-    assert collection.query_calls == 0
-
-
-def test_chroma_rejects_filter_it_cannot_translate_before_query(
-    contract_corpus: ContractCorpus,
-) -> None:
-    embedder = HashingEmbedder(32)
-    manifest = replace(
-        contract_corpus.manifest,
-        embedder_fingerprint=embedder.fingerprint,
-        embedding_dimension=32,
-        normalization=NormalizationMode.L2,
-    )
-    collection = _Collection(
-        {
-            "ragkit_manifest_v1": json.dumps(manifest.to_dict()),
-            "ragkit_metric": "cosine",
-        }
-    )
-    store = ChromaVectorStore("unused", "test-collection", client=_ChromaClient(collection))
-    with pytest.raises(UnsupportedCapabilityError, match="general NOT"):
-        store.search(
-            VectorSearchRequest(
-                embedder.embed_query("alpha"),
-                embedder.fingerprint,
-                1,
-                Not(Comparison("category", ComparisonOperator.EQ, "keep")),
-                manifest,
-            )
-        )
-    assert collection.query_calls == 0
-
-
-@pytest.mark.parametrize(
-    "query_result",
-    [
-        {"ids": [[]], "metadatas": [[]]},
-        {"ids": [["unexpected"]], "metadatas": [[]], "distances": [[]]},
-    ],
-)
-def test_chroma_rejects_malformed_or_misaligned_query_batches(
-    contract_corpus: ContractCorpus, query_result: dict[str, object]
-) -> None:
-    embedder = HashingEmbedder(32)
-    manifest = replace(
-        contract_corpus.manifest,
-        embedder_fingerprint=embedder.fingerprint,
-        embedding_dimension=32,
-        normalization=NormalizationMode.L2,
-    )
-    collection = _Collection(
-        {
-            "ragkit_manifest_v1": json.dumps(manifest.to_dict()),
-            "ragkit_metric": "cosine",
-        },
-        query_result,
-    )
-    store = ChromaVectorStore("unused", "test-collection", client=_ChromaClient(collection))
-
-    with pytest.raises(IntegrityError, match="query"):
-        store.search(
-            VectorSearchRequest(
-                embedder.embed_query("alpha"), embedder.fingerprint, 1, None, manifest
-            )
-        )
-
-
-def test_chroma_rejects_provider_ids_that_do_not_match_stored_chunks(
-    contract_corpus: ContractCorpus,
-) -> None:
-    embedder = HashingEmbedder(32)
-    manifest = replace(
-        contract_corpus.manifest,
-        embedder_fingerprint=embedder.fingerprint,
-        embedding_dimension=32,
-        normalization=NormalizationMode.L2,
-    )
-    chunk = contract_corpus.chunks[0]
-    encoded = json.dumps(chunk.to_dict())
-    collection = _Collection(
-        {
-            "ragkit_manifest_v1": json.dumps(manifest.to_dict()),
-            "ragkit_metric": "cosine",
-        },
-        {
-            "ids": [["wrong-id", str(chunk.chunk_id)]],
-            "metadatas": [[{"ragkit_chunk_v1": encoded}, {"ragkit_chunk_v1": encoded}]],
-            "distances": [[0.1, 0.2]],
-        },
-    )
-    store = ChromaVectorStore("unused", "test-collection", client=_ChromaClient(collection))
-
-    with pytest.raises(IntegrityError, match="identity"):
-        store.search(
-            VectorSearchRequest(
-                embedder.embed_query("alpha"), embedder.fingerprint, 2, None, manifest
-            )
-        )

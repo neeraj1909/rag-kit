@@ -26,11 +26,11 @@ def test_inspection_reports_missing_extra_without_importing_sdk(
     monkeypatch.setattr("builtins.__import__", lambda name, *args, **kwargs: imported.append(name))
 
     result = inspect_optional_capability(
-        OptionalCapability("persistent", "chromadb", credential_env=None)
+        OptionalCapability("example-extra", "missing_example_sdk", credential_env=None)
     )
 
     assert result.installed is False
-    assert result.action == "install rag-kit[persistent]"
+    assert result.action == "install rag-kit[example-extra]"
     assert result.credential == "not-required"
     assert imported == []
 

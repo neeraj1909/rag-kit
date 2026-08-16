@@ -25,7 +25,7 @@ does not belong in domain or application code. See `ARCHITECTURE.md`.
   asset identity and exact span, page/region/cell, timestamp, or keyframe.
 - Unsupported capabilities and degraded evidence are explicit. Never silently
   drop a modality, locator, filter, or confidence limitation.
-- `memory` is process-local; `chroma` is persistent. Local model adapters use
+- `memory` is process-local; `sqlite` is persistent. Local model adapters use
   provisioned, revision-pinned files and never download implicitly.
 - Hosted credentials are resolved only during composition and are never stored,
   fingerprinted, logged, or included in errors.
