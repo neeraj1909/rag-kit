@@ -19,7 +19,9 @@ from .interfaces import (
 from .models import (
     AcquiredAsset,
     AssetClassification,
+    ChunkingPolicy,
     ChunkingRequest,
+    ChunkingStrategy,
     DeleteRequest,
     DocumentFamily,
     EmbeddingBatch,
@@ -45,13 +47,20 @@ from .models import (
     TokenUsage,
     UpsertRequest,
     VectorSearchRequest,
+    default_chunking_strategy,
+    is_chunking_strategy_supported,
+    resolve_chunking_policy,
+    supported_chunking_strategies,
+    validate_chunking_strategy,
 )
 
 __all__ = [
     "AcquiredAsset",
     "AssetClassification",
     "Chunker",
+    "ChunkingPolicy",
     "ChunkingRequest",
+    "ChunkingStrategy",
     "DeleteRequest",
     "DocumentExtractor",
     "DocumentFamily",
@@ -90,4 +99,9 @@ __all__ = [
     "UpsertRequest",
     "VectorSearchRequest",
     "VectorStore",
+    "default_chunking_strategy",
+    "is_chunking_strategy_supported",
+    "resolve_chunking_policy",
+    "supported_chunking_strategies",
+    "validate_chunking_strategy",
 ]

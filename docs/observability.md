@@ -32,8 +32,8 @@ limited to 16 KiB and unknown fields are rejected.
 |---|---|---|
 | `GET /healthz` | no body | `status: "ok"` |
 | `GET /readyz` | no body | `status: "ready"` |
-| `POST /v1/index` | `{"source_uri":"..."}` | `documents`, `chunks`, `index_manifest_fingerprint`, `diagnostics` |
-| `POST /v1/ask` | `{"query":"...","source_uri":"..."}` | `answer`, `citations`, `model_fingerprint`, `diagnostics` |
+| `POST /v1/index` | `{"source_uri":"...","chunking_strategy":"recursive"}` | `documents`, `chunks`, `index_manifest_fingerprint`, `diagnostics` |
+| `POST /v1/ask` | `{"query":"...","source_uri":"...","chunking_strategy":"recursive"}` | `answer`, `citations`, `model_fingerprint`, `diagnostics` |
 
 Index a source before asking against it. This is observable for process-local
 profiles and required for a new persistent collection. The ask route does not
@@ -43,6 +43,11 @@ silently index, rebuild, or migrate data.
 Equivalent path spellings are canonicalized to that configured value; another
 host path fails with `source_not_allowed` before manifest construction or
 connector access.
+
+`chunking_strategy` is optional. When present, it must match the configured or
+resolved profile strategy; a different value fails with
+`chunking_strategy_not_configured`. Changing strategy requires a separately
+composed runtime because the resolved policy is part of the index manifest.
 
 Errors have one stable shape:
 

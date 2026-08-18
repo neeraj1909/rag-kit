@@ -153,17 +153,22 @@ class HttpApp:
         if path == "/v1/index":
             self._require_method(method, "POST")
             body = await self._json_body(receive)
-            source_uri = self._authorized_source(
-                self._exact_string_body(body, {"source_uri"}, "source_uri")
-            )
+            if set(body) not in ({"source_uri"}, {"source_uri", "chunking_strategy"}):
+                raise _HttpFailure(400, "invalid_schema", "request schema is invalid")
+            source_uri = self._authorized_source(self._body_string(body, "source_uri"))
+            self._require_chunking_strategy(body)
             return 200, self._index(source_uri, request_id)
         if path == "/v1/ask":
             self._require_method(method, "POST")
             body = await self._json_body(receive)
-            if set(body) != {"query", "source_uri"}:
+            if set(body) not in (
+                {"query", "source_uri"},
+                {"query", "source_uri", "chunking_strategy"},
+            ):
                 raise _HttpFailure(400, "invalid_schema", "request schema is invalid")
             query = self._body_string(body, "query")
             source_uri = self._authorized_source(self._body_string(body, "source_uri"))
+            self._require_chunking_strategy(body)
             return 200, self._ask(query, source_uri, request_id)
         raise _HttpFailure(404, "not_found", "route not found")
 
@@ -172,6 +177,23 @@ class HttpApp:
         if Path(requested).resolve(strict=False) != Path(configured).resolve(strict=False):
             raise _HttpFailure(400, "source_not_allowed", "source is not allowed by this profile")
         return configured
+
+    def _require_chunking_strategy(self, body: dict[str, object]) -> None:
+        requested = body.get("chunking_strategy")
+        if requested is None:
+            return
+        if not isinstance(requested, str) or not requested.strip():
+            raise _HttpFailure(400, "invalid_schema", "request schema is invalid")
+        accepted = {
+            self._profile.settings.chunking_strategy.value,
+            self._profile.chunking_policy.strategy.value,
+        }
+        if requested not in accepted:
+            raise _HttpFailure(
+                400,
+                "chunking_strategy_not_configured",
+                "chunking strategy is not configured by this profile",
+            )
 
     def _index(self, source_uri: str, request_id: str) -> dict[str, object]:
         limits = self._profile.limits
@@ -184,6 +206,7 @@ class HttpApp:
                 max_documents=limits.max_documents,
                 max_parts_per_document=limits.max_parts_per_document,
                 max_chunks=limits.max_chunks,
+                chunking_policy=self._profile.chunking_policy,
             )
         )
         return self._base_payload(

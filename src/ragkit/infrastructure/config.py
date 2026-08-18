@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import TypeVar, cast
 
 from ragkit.domain import ComponentFingerprint, InvalidDomainValueError
-from ragkit.ports import DocumentFamily
+from ragkit.ports import (
+    ChunkingPolicy,
+    ChunkingStrategy,
+    DocumentFamily,
+    resolve_chunking_policy,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +113,33 @@ class AdapterSettings:
     credential_env: str = "OPENAI_API_KEY"
     timeout_seconds: float = 30.0
     max_retries: int = 2
+    chunking_strategy: ChunkingStrategy = ChunkingStrategy.AUTO
+    chunk_overlap_chars: int = 0
+    chunk_min_chars: int = 1
+    chunk_semantic_threshold: float = 0.72
+    chunk_include_parent_context: bool = True
 
     def __post_init__(self) -> None:
+        if not isinstance(self.chunking_strategy, ChunkingStrategy):
+            raise InvalidDomainValueError("chunking_strategy must be a supported strategy")
+        if (
+            type(self.chunk_overlap_chars) is not int
+            or self.chunk_overlap_chars < 0
+            or type(self.chunk_min_chars) is not int
+            or self.chunk_min_chars <= 0
+        ):
+            raise InvalidDomainValueError(
+                "chunk overlap must be non-negative and minimum size must be positive"
+            )
+        if (
+            isinstance(self.chunk_semantic_threshold, bool)
+            or not isinstance(self.chunk_semantic_threshold, (int, float))
+            or not math.isfinite(self.chunk_semantic_threshold)
+            or not 0.0 <= self.chunk_semantic_threshold <= 1.0
+        ):
+            raise InvalidDomainValueError("chunk_semantic_threshold must be finite in [0, 1]")
+        if type(self.chunk_include_parent_context) is not bool:
+            raise InvalidDomainValueError("chunk_include_parent_context must be a boolean")
         phase4_integers = (
             self.hybrid_rrf_k,
             self.hybrid_candidate_multiplier,
@@ -238,6 +268,12 @@ class OfflineProfile:
             or not isinstance(self.family, DocumentFamily)
         ):
             raise InvalidDomainValueError("profile name, source, and family must be valid")
+        if self.settings.chunk_overlap_chars >= self.limits.chunk_chars:
+            raise InvalidDomainValueError(
+                "chunk_overlap_chars must be smaller than limits.chunk_chars"
+            )
+        if self.settings.chunk_min_chars > self.limits.chunk_chars:
+            raise InvalidDomainValueError("chunk_min_chars must not exceed limits.chunk_chars")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -250,6 +286,22 @@ class OfflineProfile:
     @property
     def fingerprint(self) -> ComponentFingerprint:
         return ComponentFingerprint.create("profile", "ragkit.toml", self.to_dict())
+
+    @property
+    def chunking_policy(self) -> ChunkingPolicy:
+        """Return the concrete policy bound into the chunker and index manifest."""
+
+        return resolve_chunking_policy(
+            self.family,
+            ChunkingPolicy(
+                strategy=self.settings.chunking_strategy,
+                max_chars=self.limits.chunk_chars,
+                overlap_chars=self.settings.chunk_overlap_chars,
+                min_chunk_chars=self.settings.chunk_min_chars,
+                semantic_threshold=self.settings.chunk_semantic_threshold,
+                include_parent_context=self.settings.chunk_include_parent_context,
+            ),
+        )
 
 
 _T = TypeVar("_T")
@@ -453,6 +505,25 @@ def load_config(path: str | Path) -> OfflineProfile:
                 float, raw_settings.get("timeout_seconds", defaults.timeout_seconds)
             ),
             max_retries=cast(int, raw_settings.get("max_retries", defaults.max_retries)),
+            chunking_strategy=ChunkingStrategy(
+                cast(str, raw_settings.get("chunking_strategy", defaults.chunking_strategy))
+            ),
+            chunk_overlap_chars=cast(
+                int, raw_settings.get("chunk_overlap_chars", defaults.chunk_overlap_chars)
+            ),
+            chunk_min_chars=cast(
+                int, raw_settings.get("chunk_min_chars", defaults.chunk_min_chars)
+            ),
+            chunk_semantic_threshold=cast(
+                float,
+                raw_settings.get("chunk_semantic_threshold", defaults.chunk_semantic_threshold),
+            ),
+            chunk_include_parent_context=cast(
+                bool,
+                raw_settings.get(
+                    "chunk_include_parent_context", defaults.chunk_include_parent_context
+                ),
+            ),
         )
     except (TypeError, ValueError) as error:
         raise InvalidDomainValueError(f"invalid settings: {error}", cause=error) from error

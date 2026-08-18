@@ -19,7 +19,7 @@ from ragkit.delivery.http import HttpApp
 from ragkit.domain import IndexManifest, InvalidDomainValueError
 from ragkit.infrastructure.bootstrap import OfflineRuntime
 from ragkit.infrastructure.config import OfflineProfile
-from ragkit.ports import Telemetry, TelemetryEvent, TelemetryOutcome
+from ragkit.ports import ChunkingStrategy, Telemetry, TelemetryEvent, TelemetryOutcome
 
 pytestmark = pytest.mark.integration
 
@@ -238,6 +238,7 @@ def test_index_and_ask_delegate_exactly_once_to_application_use_cases(
     assert len(pipeline.index_requests) == 1
     assert pipeline.index_requests[0].source_uri == "tests/fixtures/corpus"
     assert pipeline.index_requests[0].max_chunks == 20
+    assert pipeline.index_requests[0].chunking_policy.strategy is ChunkingStrategy.RECURSIVE
     assert answered[0] == 200
     assert answered[2] == {
         "answer": "",
@@ -250,6 +251,43 @@ def test_index_and_ask_delegate_exactly_once_to_application_use_cases(
     assert len(pipeline.ask_requests) == 1
     assert pipeline.ask_requests[0].query == "private question"
     assert pipeline.ask_requests[0].retrieval_top_k == 3
+
+
+def test_http_accepts_only_the_profile_bound_chunking_strategy(
+    app: tuple[HttpApp, StubPipeline, RecordingTelemetry],
+) -> None:
+    http, pipeline, _ = app
+
+    accepted = run_synchronous(
+        request(
+            http,
+            "POST",
+            "/v1/index",
+            body={
+                "source_uri": "tests/fixtures/corpus",
+                "chunking_strategy": "recursive",
+            },
+        )
+    )
+    rejected = run_synchronous(
+        request(
+            http,
+            "POST",
+            "/v1/index",
+            body={
+                "source_uri": "tests/fixtures/corpus",
+                "chunking_strategy": "legal",
+            },
+        )
+    )
+
+    assert accepted[0] == 200
+    assert len(pipeline.index_requests) == 1
+    assert rejected[0] == 400
+    assert rejected[2]["error"] == {
+        "code": "chunking_strategy_not_configured",
+        "message": "chunking strategy is not configured by this profile",
+    }
 
 
 @pytest.mark.parametrize("source_uri", ["/etc/passwd", "tests/fixtures/corpus/../../.."])

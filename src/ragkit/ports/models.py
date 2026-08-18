@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from ragkit.domain import (
@@ -53,6 +53,212 @@ class DocumentFamily(StrEnum):
     LAYOUT = "layout"
     VISION = "vision"
     MEDIA = "media"
+
+
+class ChunkingStrategy(StrEnum):
+    """Stable names for supported indexing-time chunking behaviors."""
+
+    AUTO = "auto"
+    FIXED = "fixed"
+    SLIDING_WINDOW = "sliding_window"
+    RECURSIVE = "recursive"
+    SENTENCE = "sentence"
+    PARAGRAPH = "paragraph"
+    SECTION = "section"
+    HIERARCHICAL = "hierarchical"
+    SEMANTIC = "semantic"
+    PROPOSITION = "proposition"
+    BOOK = "book"
+    LEGAL = "legal"
+    MEDICAL = "medical"
+    CODE = "code"
+    CONVERSATION = "conversation"
+    TABLE = "table"
+    LAYOUT_REGION = "layout_region"
+    IMAGE_REGION = "image_region"
+    TRANSCRIPT_SEGMENT = "transcript_segment"
+    SCENE = "scene"
+    EVIDENCE = "evidence"
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkingPolicy:
+    """Validated behavior inputs for one deterministic chunking strategy."""
+
+    strategy: ChunkingStrategy = ChunkingStrategy.AUTO
+    max_chars: int = 1200
+    overlap_chars: int = 120
+    min_chunk_chars: int = 80
+    semantic_threshold: float = 0.72
+    include_parent_context: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.strategy, ChunkingStrategy):
+            raise InvalidDomainValueError("strategy must be a ChunkingStrategy")
+        if type(self.max_chars) is not int:
+            raise InvalidDomainValueError("max_chars must be an integer")
+        _positive(self.max_chars, "max_chars")
+        if type(self.overlap_chars) is not int:
+            raise InvalidDomainValueError("overlap_chars must be an integer")
+        if self.overlap_chars < 0:
+            raise InvalidDomainValueError("overlap_chars must be non-negative")
+        if self.overlap_chars >= self.max_chars:
+            raise InvalidDomainValueError("overlap_chars must be smaller than max_chars")
+        if type(self.min_chunk_chars) is not int:
+            raise InvalidDomainValueError("min_chunk_chars must be an integer")
+        _positive(self.min_chunk_chars, "min_chunk_chars")
+        if self.min_chunk_chars > self.max_chars:
+            raise InvalidDomainValueError("min_chunk_chars must not exceed max_chars")
+        if isinstance(self.semantic_threshold, bool) or not isinstance(
+            self.semantic_threshold, (int, float)
+        ):
+            raise InvalidDomainValueError("semantic_threshold must be numeric")
+        threshold = float(self.semantic_threshold)
+        if not math.isfinite(threshold):
+            raise InvalidDomainValueError("semantic_threshold must be finite")
+        if not 0 <= threshold <= 1:
+            raise InvalidDomainValueError("semantic_threshold must be in [0, 1]")
+        object.__setattr__(self, "semantic_threshold", threshold)
+        if type(self.include_parent_context) is not bool:
+            raise InvalidDomainValueError("include_parent_context must be a boolean")
+
+    def fingerprint_inputs(self) -> dict[str, str | int | float | bool]:
+        """Return canonical behavior inputs suitable for component fingerprinting."""
+
+        return {
+            "schema": "chunking-policy-v1",
+            "strategy": self.strategy.value,
+            "max_chars": self.max_chars,
+            "overlap_chars": self.overlap_chars,
+            "min_chunk_chars": self.min_chunk_chars,
+            "semantic_threshold": self.semantic_threshold,
+            "include_parent_context": self.include_parent_context,
+        }
+
+
+_COMMON_PROSE_STRATEGIES = frozenset(
+    {
+        ChunkingStrategy.AUTO,
+        ChunkingStrategy.FIXED,
+        ChunkingStrategy.SLIDING_WINDOW,
+        ChunkingStrategy.RECURSIVE,
+        ChunkingStrategy.SENTENCE,
+        ChunkingStrategy.PARAGRAPH,
+        ChunkingStrategy.SECTION,
+        ChunkingStrategy.HIERARCHICAL,
+        ChunkingStrategy.SEMANTIC,
+        ChunkingStrategy.PROPOSITION,
+        ChunkingStrategy.EVIDENCE,
+    }
+)
+
+_CHUNKING_STRATEGIES_BY_FAMILY: dict[DocumentFamily, frozenset[ChunkingStrategy]] = {
+    DocumentFamily.TEXT: _COMMON_PROSE_STRATEGIES
+    | {
+        ChunkingStrategy.BOOK,
+        ChunkingStrategy.LEGAL,
+        ChunkingStrategy.MEDICAL,
+        ChunkingStrategy.CODE,
+        ChunkingStrategy.CONVERSATION,
+        ChunkingStrategy.TABLE,
+    },
+    DocumentFamily.OCR: _COMMON_PROSE_STRATEGIES
+    | {
+        ChunkingStrategy.BOOK,
+        ChunkingStrategy.LEGAL,
+        ChunkingStrategy.MEDICAL,
+        ChunkingStrategy.CONVERSATION,
+        ChunkingStrategy.TABLE,
+        ChunkingStrategy.LAYOUT_REGION,
+    },
+    DocumentFamily.LAYOUT: _COMMON_PROSE_STRATEGIES
+    | {
+        ChunkingStrategy.BOOK,
+        ChunkingStrategy.LEGAL,
+        ChunkingStrategy.MEDICAL,
+        ChunkingStrategy.CODE,
+        ChunkingStrategy.CONVERSATION,
+        ChunkingStrategy.TABLE,
+        ChunkingStrategy.LAYOUT_REGION,
+    },
+    DocumentFamily.VISION: frozenset(
+        {
+            ChunkingStrategy.AUTO,
+            ChunkingStrategy.FIXED,
+            ChunkingStrategy.SLIDING_WINDOW,
+            ChunkingStrategy.RECURSIVE,
+            ChunkingStrategy.SENTENCE,
+            ChunkingStrategy.PARAGRAPH,
+            ChunkingStrategy.SEMANTIC,
+            ChunkingStrategy.PROPOSITION,
+            ChunkingStrategy.IMAGE_REGION,
+            ChunkingStrategy.EVIDENCE,
+        }
+    ),
+    DocumentFamily.MEDIA: frozenset(
+        {
+            ChunkingStrategy.AUTO,
+            ChunkingStrategy.FIXED,
+            ChunkingStrategy.SLIDING_WINDOW,
+            ChunkingStrategy.RECURSIVE,
+            ChunkingStrategy.SENTENCE,
+            ChunkingStrategy.PARAGRAPH,
+            ChunkingStrategy.SEMANTIC,
+            ChunkingStrategy.PROPOSITION,
+            ChunkingStrategy.CONVERSATION,
+            ChunkingStrategy.TRANSCRIPT_SEGMENT,
+            ChunkingStrategy.SCENE,
+            ChunkingStrategy.EVIDENCE,
+        }
+    ),
+}
+
+
+def supported_chunking_strategies(family: DocumentFamily) -> frozenset[ChunkingStrategy]:
+    """Return the explicit strategy catalog supported by one document family."""
+
+    if not isinstance(family, DocumentFamily):
+        raise InvalidDomainValueError("family must be a DocumentFamily")
+    return _CHUNKING_STRATEGIES_BY_FAMILY[family]
+
+
+def is_chunking_strategy_supported(family: DocumentFamily, strategy: ChunkingStrategy) -> bool:
+    """Report compatibility without silently coercing either public enum."""
+
+    if not isinstance(strategy, ChunkingStrategy):
+        raise InvalidDomainValueError("strategy must be a ChunkingStrategy")
+    return strategy in supported_chunking_strategies(family)
+
+
+def validate_chunking_strategy(family: DocumentFamily, strategy: ChunkingStrategy) -> None:
+    """Reject a strategy that cannot preserve the selected family's evidence."""
+
+    if not is_chunking_strategy_supported(family, strategy):
+        raise InvalidDomainValueError(
+            f"chunking strategy {strategy.value!r} is not supported for {family.value!r} documents"
+        )
+
+
+def default_chunking_strategy(family: DocumentFamily) -> ChunkingStrategy:
+    """Resolve ``auto`` to the stable compatibility default for one family."""
+
+    supported_chunking_strategies(family)
+    if family is DocumentFamily.TEXT:
+        return ChunkingStrategy.RECURSIVE
+    return ChunkingStrategy.EVIDENCE
+
+
+def resolve_chunking_policy(family: DocumentFamily, policy: ChunkingPolicy) -> ChunkingPolicy:
+    """Validate and return a concrete, fingerprintable policy for one family."""
+
+    if not isinstance(policy, ChunkingPolicy):
+        raise InvalidDomainValueError("policy must be a ChunkingPolicy")
+    strategy = policy.strategy
+    if strategy is ChunkingStrategy.AUTO:
+        strategy = default_chunking_strategy(family)
+        return replace(policy, strategy=strategy)
+    validate_chunking_strategy(family, strategy)
+    return policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,9 +339,12 @@ class ChunkingRequest:
 
     documents: tuple[Document, ...]
     max_chunks: int
+    policy: ChunkingPolicy = ChunkingPolicy()
 
     def __post_init__(self) -> None:
         _positive(self.max_chunks, "max_chunks")
+        if not isinstance(self.policy, ChunkingPolicy):
+            raise InvalidDomainValueError("policy must be a ChunkingPolicy")
 
 
 @dataclass(frozen=True, slots=True)

@@ -53,6 +53,12 @@ tuple/batch; single-query operations reject blank input. Unsupported filters or
 modalities raise `UnsupportedCapabilityError` instead of producing a weaker
 result.
 
+`ChunkingRequest.policy` is an immutable indexing-time contract. Composition
+resolves `auto`, validates family compatibility, and binds the complete policy to
+the chunker fingerprint before manifest construction. An explicit request policy
+that differs from the bound policy fails before index mutation; no adapter may
+silently substitute a strategy. See [Chunking strategies](chunking-strategies.md).
+
 An upsert batch and query vector carry the embedder fingerprint that produced
 them. Their fingerprint, dimension, and normalization must match the index
 manifest before the vector-store adapter is called. Rerank requests reject

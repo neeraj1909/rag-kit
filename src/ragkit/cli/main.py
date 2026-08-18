@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter_ns
 from typing import TextIO, cast
@@ -20,7 +21,7 @@ from ragkit.application import (
 from ragkit.domain import InvalidDomainValueError, RagkitError, locator_to_dict
 from ragkit.infrastructure.bootstrap import OfflineRuntime, bootstrap, inspect_profile
 from ragkit.infrastructure.config import OfflineProfile, load_config
-from ragkit.ports import EvaluationCase, EvaluationExample, EvaluationRequest
+from ragkit.ports import ChunkingStrategy, EvaluationCase, EvaluationExample, EvaluationRequest
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -46,6 +47,11 @@ def _parser() -> argparse.ArgumentParser:
 def _profile_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--source", type=Path)
+    parser.add_argument(
+        "--chunking-strategy",
+        choices=tuple(strategy.value for strategy in ChunkingStrategy),
+        help="override the profile's indexing-time chunking strategy",
+    )
 
 
 def _source(args: argparse.Namespace, profile: OfflineProfile) -> str:
@@ -64,6 +70,7 @@ def _index(runtime: OfflineRuntime, profile: OfflineProfile, source: str) -> Ind
             max_documents=limits.max_documents,
             max_parts_per_document=limits.max_parts_per_document,
             max_chunks=limits.max_chunks,
+            chunking_policy=runtime.chunking_policy,
         )
     )
 
@@ -173,6 +180,16 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "capabilities": inspect_profile(profile),
         }
 
+    selected_strategy = cast(str | None, args.chunking_strategy)
+    if selected_strategy is not None:
+        profile = replace(
+            profile,
+            settings=replace(
+                profile.settings,
+                chunking_strategy=ChunkingStrategy(selected_strategy),
+            ),
+        )
+
     runtime = bootstrap(profile)
     source = _source(args, profile)
     index_result = _index(runtime, profile, source)
@@ -187,6 +204,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "storage": "persistent" if persistent else "process_local",
             "timings_ms": _timings(index_result.timings),
             "diagnostics": [item.code for item in index_result.diagnostics],
+            "chunking_strategy": runtime.chunking_policy.strategy.value,
         }
 
     if args.command == "ask":
@@ -214,6 +232,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             ),
             "timings_ms": timings,
             "diagnostics": [item.code for item in answer_result.diagnostics],
+            "chunking_strategy": runtime.chunking_policy.strategy.value,
         }
 
     examples = _load_dataset(cast(Path, args.dataset))
@@ -233,6 +252,7 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
         "metrics": {metric.name: metric.value for metric in report.metrics},
         "config_fingerprint": str(profile.fingerprint),
         "index_mode": "rebuilt_in_process",
+        "chunking_strategy": runtime.chunking_policy.strategy.value,
         "timings_ms": {
             "index_total": round(
                 sum(item.duration_ns for item in index_result.timings) / 1_000_000,

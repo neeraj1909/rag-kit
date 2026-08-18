@@ -1,5 +1,6 @@
 """Dependency-light concrete adapters for the deterministic offline profile."""
 
+from .adaptive_chunking import AdaptiveChunker
 from .classification import DeclaredFamilyClassifier
 from .cross_encoder_reranker import (
     DEFAULT_RERANKER_MODEL_ID,
@@ -12,6 +13,7 @@ from .hosted import OpenAIHostedGenerator
 from .layout import LayoutDocumentExtractor
 from .media import LocalFasterWhisperTranscriber, MediaDocumentExtractor, PySceneDetectBackend
 from .mixed import MixedImageDocumentExtractor
+from .modality_chunking import ModalityChunker
 from .multimodal import EvidenceChunker
 from .observability import InMemoryTelemetry, JsonLinesTelemetry, RequestCorrelatedTelemetry
 from .ocr import OcrDocumentExtractor
@@ -25,6 +27,7 @@ from .retrieval import (
     NoOpReranker,
 )
 from .sqlite_store import SQLiteVectorStore
+from .text_chunking import TextStrategyChunker
 from .textual import (
     NoOpDocumentProjector,
     StructureAwareChunker,
@@ -37,6 +40,7 @@ from .vision import LocalSmolVLMBackend, VisionDocumentExtractor
 __all__ = [
     "DEFAULT_RERANKER_MODEL_ID",
     "DEFAULT_RERANKER_MODEL_REVISION",
+    "AdaptiveChunker",
     "BM25Config",
     "BM25Retriever",
     "DeclaredFamilyClassifier",
@@ -56,6 +60,7 @@ __all__ = [
     "LocalSmolVLMBackend",
     "MediaDocumentExtractor",
     "MixedImageDocumentExtractor",
+    "ModalityChunker",
     "NoOpDocumentProjector",
     "NoOpReranker",
     "OcrDocumentExtractor",
@@ -67,6 +72,7 @@ __all__ = [
     "TemplatePromptBuilder",
     "TextDocumentExtractor",
     "TextFamilyClassifier",
+    "TextStrategyChunker",
     "TorchTextEmbedder",
     "VisionDocumentExtractor",
 ]

@@ -10,12 +10,12 @@ from typing import TypeVar
 from urllib.parse import unquote, urlparse
 
 from ragkit.adapters import (
+    AdaptiveChunker,
     BM25Config,
     BM25Retriever,
     DeclaredFamilyClassifier,
     DenseRetriever,
     DeterministicEvaluator,
-    EvidenceChunker,
     ExtractiveGenerator,
     FilesystemSourceConnector,
     HashingEmbedder,
@@ -34,7 +34,6 @@ from ragkit.adapters import (
     OpenAIHostedGenerator,
     PySceneDetectBackend,
     SQLiteVectorStore,
-    StructureAwareChunker,
     TemplatePromptBuilder,
     TextDocumentExtractor,
     TextFamilyClassifier,
@@ -50,6 +49,7 @@ from ragkit.domain import (
     UnsupportedCapabilityError,
 )
 from ragkit.ports import (
+    ChunkingPolicy,
     DocumentExtractor,
     DocumentFamily,
     DocumentProjector,
@@ -82,6 +82,7 @@ class OfflineRuntime:
     chunker_fingerprint: ComponentFingerprint
     embedder_fingerprint: ComponentFingerprint
     embedding_dimension: int
+    chunking_policy: ChunkingPolicy
 
     def manifest_for(self, source_uri: str) -> IndexManifest:
         """Describe index semantics for one logical corpus acquisition address."""
@@ -147,7 +148,7 @@ def _validate_family_selections(profile: OfflineProfile) -> None:
     }
     expected_extractor = extractor_matrix[profile.family]
     expected_classifier = "text" if profile.family is DocumentFamily.TEXT else "declared"
-    expected_chunker = "structure_aware" if profile.family is DocumentFamily.TEXT else "evidence"
+    expected_chunker = "adaptive"
     actual = {
         "classifier": profile.components.classifier,
         "extractor": profile.components.extractor,
@@ -318,6 +319,7 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
     """Validate one profile and wire its adapters without hidden fallbacks."""
 
     _validate_family_selections(profile)
+    chunking_policy = profile.chunking_policy
     components = profile.components
     connector: SourceConnector = _select(
         {"filesystem": FilesystemSourceConnector}, "connector", components.connector
@@ -395,8 +397,7 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
     )
     chunker = _select(
         {
-            "structure_aware": lambda: StructureAwareChunker(profile.limits.chunk_chars),
-            "evidence": lambda: EvidenceChunker(profile.limits.chunk_chars),
+            "adaptive": lambda: AdaptiveChunker(profile.family, chunking_policy),
         },
         "chunker",
         components.chunker,
@@ -527,4 +528,5 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
         chunker_fingerprint=chunker.fingerprint,
         embedder_fingerprint=embedder.fingerprint,
         embedding_dimension=embedder.dimension,
+        chunking_policy=chunking_policy,
     )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from time import perf_counter_ns
 
 from ragkit.domain import (
@@ -27,6 +27,7 @@ from ragkit.domain import (
 from ragkit.ports import (
     AcquiredAsset,
     Chunker,
+    ChunkingPolicy,
     ChunkingRequest,
     DocumentExtractor,
     DocumentProjector,
@@ -63,6 +64,7 @@ class IndexingRequest:
     max_documents: int = 32
     max_parts_per_document: int = 10_000
     max_chunks: int = 100_000
+    chunking_policy: ChunkingPolicy = field(default_factory=ChunkingPolicy)
 
     def __post_init__(self) -> None:
         if not self.source_uri.strip():
@@ -203,7 +205,9 @@ class IndexingService:
 
         chunks = invoke_timed(
             "index.chunk",
-            lambda: self._chunker.chunk(ChunkingRequest(projected, request.max_chunks)),
+            lambda: self._chunker.chunk(
+                ChunkingRequest(projected, request.max_chunks, request.chunking_policy)
+            ),
             self._telemetry,
             self._clock,
             timings,
