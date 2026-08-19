@@ -12,6 +12,10 @@ selected or raises a typed, actionable error without a fallback.
 | `media` | Cached immutable faster-whisper revision and deterministic scene midpoint | 30-minute, segment, scene, and two-hour operation limits; engines are not declared thread-safe | No diarization; speaker identity and ASR confidence remain unknown |
 | `torch` | Cached immutable encoder revision, eval/inference, explicit batching/pooling/L2 | Batch/max-length/device settings; model instance is not declared thread-safe | No implicit downloads or GPU fallback |
 | `sqlite` | Standard-library local database with transactional manifest preflight and exact JSON row decoding | Request `top_k`; SQLite serializes writers while reads use independent connections | Exact cosine search scans the bounded profile index; no implicit migration/reset |
+| `pgvector` | Transactional manifest check and parameterized cosine SQL | Local batch/`top_k`; database concurrency is operator-owned | Unit SQL evidence only; live extension, restart, and ANN plans are unproven |
+| `qdrant` | Named cosine vectors, manifest sentinel, deterministic point IDs | Local batch/`top_k`; remote consistency is service-owned | Local SDK evidence; remote persistence and tied cutoff selection are unproven |
+| `pinecone` | Pre-provisioned manifest-first managed data plane | Bounded batch/metadata/timeout/retries | Injected-client evidence; eventual consistency and live behavior are opt-in |
+| `opensearch` | Atomic mapping/manifest creation and inspected bulk responses | Bounded batches; `refresh=wait_for` in the reference adapter | Injected-client evidence; HNSW cutoff and service restart are opt-in |
 | `openai` | Explicit network call with bounded SDK timeout/retry settings | Request output limit; SDK client concurrency semantics | Mocked by default; one double-opt-in paid smoke exists, but no live-quality or availability claim |
 
 `ragkit inspect-config` reports the five supported families, selected component

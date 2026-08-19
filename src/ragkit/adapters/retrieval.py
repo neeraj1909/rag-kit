@@ -31,6 +31,7 @@ from ragkit.domain import (
     ScoredChunk,
     ScoreKind,
     ScoreProvenance,
+    UnsupportedCapabilityError,
     derive_chunk_id,
 )
 from ragkit.ports import (
@@ -107,6 +108,10 @@ class BM25Retriever(Retriever, SparseIndex):
     def size(self) -> int:
         with self._lock:
             return len(self._chunks)
+
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        with self._lock:
+            self._require_compatible(manifest)
 
     def upsert(self, request: SparseUpsertRequest) -> None:
         with self._lock:
@@ -346,6 +351,39 @@ class HybridRetriever(Retriever):
         )
 
 
+class DisabledEmbedder(Embedder):
+    """Represent an intentionally absent dense projection for sparse-only indexes."""
+
+    def __init__(self) -> None:
+        self._fingerprint = ComponentFingerprint.create(
+            "embedder", "not_materialized", {"version": 1}
+        )
+
+    @property
+    def dimension(self) -> int:
+        return 1
+
+    @property
+    def normalization(self) -> NormalizationMode:
+        return NormalizationMode.L2
+
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return self._fingerprint
+
+    def embed_documents(self, request: EmbeddingRequest) -> EmbeddingBatch:
+        raise UnsupportedCapabilityError(
+            "sparse-only indexing does not materialize embeddings",
+            capability="sparse_only_embedding",
+        )
+
+    def embed_query(self, text: str) -> Embedding:
+        raise UnsupportedCapabilityError(
+            "sparse-only retrieval does not embed queries",
+            capability="sparse_only_embedding",
+        )
+
+
 class HashingEmbedder(Embedder):
     """Map normalized word tokens to a fixed-width L2-normalized feature vector."""
 
@@ -417,6 +455,11 @@ class InMemoryVectorStore(VectorStore):
     @property
     def fingerprint(self) -> ComponentFingerprint:
         return self._fingerprint
+
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        with self._lock:
+            self._require_compatible(manifest)
+            self._require_cosine_manifest(manifest)
 
     def upsert(self, request: UpsertRequest) -> None:
         with self._lock:

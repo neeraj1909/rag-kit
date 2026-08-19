@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ragkit.domain import Chunk, ComponentFingerprint, Document, Embedding, ScoredChunk
+from ragkit.domain import (
+    Chunk,
+    ComponentFingerprint,
+    Document,
+    Embedding,
+    IndexManifest,
+    ScoredChunk,
+)
 
 from .models import (
     AcquiredAsset,
@@ -174,6 +181,10 @@ class VectorStore(ABC):
         """Identify provider, score semantics, persistence mode, and behavior limits."""
 
     @abstractmethod
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        """Validate compatibility without creating or mutating index state."""
+
+    @abstractmethod
     def upsert(self, request: UpsertRequest) -> None:
         """Idempotently store aligned chunks and embeddings after manifest validation."""
 
@@ -219,6 +230,15 @@ class SparseIndex(ABC):
     chunks but neither is synthesized by mutation. Implementations document storage
     limits and persistence guarantees.
     """
+
+    @property
+    @abstractmethod
+    def fingerprint(self) -> ComponentFingerprint:
+        """Identify sparse index scoring, tokenization, and storage semantics."""
+
+    @abstractmethod
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        """Validate compatibility without creating or mutating index state."""
 
     @abstractmethod
     def upsert(self, request: SparseUpsertRequest) -> None:

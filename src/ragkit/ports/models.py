@@ -55,6 +55,193 @@ class DocumentFamily(StrEnum):
     MEDIA = "media"
 
 
+class IndexingStrategy(StrEnum):
+    """Logical searchable projections materialized during indexing."""
+
+    AUTO = "auto"
+    DENSE = "dense"
+    SPARSE = "sparse"
+    HYBRID = "hybrid"
+
+
+class VectorDatabase(StrEnum):
+    """Stable provider selections understood by the composition layer."""
+
+    NONE = "none"
+    MEMORY = "memory"
+    SQLITE = "sqlite"
+    PGVECTOR = "pgvector"
+    QDRANT = "qdrant"
+    PINECONE = "pinecone"
+    OPENSEARCH = "opensearch"
+
+
+class PhysicalIndexStrategy(StrEnum):
+    """Provider-neutral names for supported physical vector index families."""
+
+    NONE = "none"
+    AUTO = "auto"
+    EXACT = "exact"
+    HNSW = "hnsw"
+    IVF_FLAT = "ivf_flat"
+    MANAGED = "managed"
+
+
+@dataclass(frozen=True, slots=True)
+class IndexingPolicy:
+    """Select logical indexing behavior and one compatible vector backend."""
+
+    strategy: IndexingStrategy = IndexingStrategy.AUTO
+    vector_database: VectorDatabase = VectorDatabase.MEMORY
+    physical_index: PhysicalIndexStrategy = PhysicalIndexStrategy.AUTO
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.strategy, IndexingStrategy):
+            raise InvalidDomainValueError("strategy must be an IndexingStrategy")
+        if not isinstance(self.vector_database, VectorDatabase):
+            raise InvalidDomainValueError("vector_database must be a VectorDatabase")
+        if not isinstance(self.physical_index, PhysicalIndexStrategy):
+            raise InvalidDomainValueError("physical_index must be a PhysicalIndexStrategy")
+
+    def fingerprint_inputs(self) -> dict[str, str]:
+        """Return every behavior-affecting selection in canonical form."""
+
+        return {
+            "schema": "indexing-policy-v1",
+            "strategy": self.strategy.value,
+            "vector_database": self.vector_database.value,
+            "physical_index": self.physical_index.value,
+        }
+
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        """Identify the complete logical and physical indexing policy."""
+
+        return ComponentFingerprint.create("indexing_policy", "ragkit", self.fingerprint_inputs())
+
+
+_INDEXING_STRATEGIES = frozenset(
+    {IndexingStrategy.DENSE, IndexingStrategy.SPARSE, IndexingStrategy.HYBRID}
+)
+
+_PHYSICAL_INDEXES_BY_DATABASE: dict[VectorDatabase, frozenset[PhysicalIndexStrategy]] = {
+    VectorDatabase.NONE: frozenset({PhysicalIndexStrategy.NONE}),
+    VectorDatabase.MEMORY: frozenset({PhysicalIndexStrategy.EXACT}),
+    VectorDatabase.SQLITE: frozenset({PhysicalIndexStrategy.EXACT}),
+    VectorDatabase.PGVECTOR: frozenset(
+        {
+            PhysicalIndexStrategy.EXACT,
+            PhysicalIndexStrategy.HNSW,
+            PhysicalIndexStrategy.IVF_FLAT,
+        }
+    ),
+    VectorDatabase.QDRANT: frozenset({PhysicalIndexStrategy.HNSW}),
+    VectorDatabase.PINECONE: frozenset({PhysicalIndexStrategy.MANAGED}),
+    VectorDatabase.OPENSEARCH: frozenset({PhysicalIndexStrategy.HNSW}),
+}
+
+_DEFAULT_PHYSICAL_INDEX: dict[VectorDatabase, PhysicalIndexStrategy] = {
+    VectorDatabase.MEMORY: PhysicalIndexStrategy.EXACT,
+    VectorDatabase.SQLITE: PhysicalIndexStrategy.EXACT,
+    VectorDatabase.PGVECTOR: PhysicalIndexStrategy.HNSW,
+    VectorDatabase.QDRANT: PhysicalIndexStrategy.HNSW,
+    VectorDatabase.PINECONE: PhysicalIndexStrategy.MANAGED,
+    VectorDatabase.OPENSEARCH: PhysicalIndexStrategy.HNSW,
+}
+
+
+def supported_indexing_strategies(
+    family: DocumentFamily,
+) -> frozenset[IndexingStrategy]:
+    """Return logical strategies supported by normalized chunks for one family."""
+
+    if not isinstance(family, DocumentFamily):
+        raise InvalidDomainValueError("family must be a DocumentFamily")
+    return _INDEXING_STRATEGIES
+
+
+def is_indexing_strategy_supported(family: DocumentFamily, strategy: IndexingStrategy) -> bool:
+    """Report family compatibility without coercing public enum values."""
+
+    if not isinstance(strategy, IndexingStrategy):
+        raise InvalidDomainValueError("strategy must be an IndexingStrategy")
+    return strategy in supported_indexing_strategies(family)
+
+
+def validate_indexing_strategy(family: DocumentFamily, strategy: IndexingStrategy) -> None:
+    """Reject unsupported logical indexing before any index mutation."""
+
+    if not is_indexing_strategy_supported(family, strategy):
+        raise InvalidDomainValueError(
+            f"indexing strategy {strategy.value!r} is not supported for {family.value!r} documents"
+        )
+
+
+def resolve_indexing_policy(family: DocumentFamily, policy: IndexingPolicy) -> IndexingPolicy:
+    """Return one concrete and provider-compatible indexing policy."""
+
+    if not isinstance(family, DocumentFamily):
+        raise InvalidDomainValueError("family must be a DocumentFamily")
+    if not isinstance(policy, IndexingPolicy):
+        raise InvalidDomainValueError("policy must be an IndexingPolicy")
+    strategy = (
+        IndexingStrategy.DENSE if policy.strategy is IndexingStrategy.AUTO else policy.strategy
+    )
+    validate_indexing_strategy(family, strategy)
+    if strategy is IndexingStrategy.SPARSE:
+        if policy.vector_database is not VectorDatabase.NONE or policy.physical_index not in {
+            PhysicalIndexStrategy.NONE,
+            PhysicalIndexStrategy.AUTO,
+        }:
+            raise InvalidDomainValueError(
+                "sparse indexing policy requires vector database 'none' and physical index 'none'"
+            )
+        return IndexingPolicy(
+            IndexingStrategy.SPARSE,
+            VectorDatabase.NONE,
+            PhysicalIndexStrategy.NONE,
+        )
+    database = policy.vector_database
+    if database is VectorDatabase.NONE:
+        raise InvalidDomainValueError(
+            "indexing policy for dense or hybrid indexing requires a vector database"
+        )
+    physical = policy.physical_index
+    if physical is PhysicalIndexStrategy.AUTO:
+        physical = _DEFAULT_PHYSICAL_INDEX[database]
+    if physical not in _PHYSICAL_INDEXES_BY_DATABASE[database]:
+        raise InvalidDomainValueError(
+            f"indexing policy physical index {physical.value!r} is incompatible "
+            f"with vector database {database.value!r}"
+        )
+    return IndexingPolicy(strategy, database, physical)
+
+
+def derive_indexing_fingerprint(
+    policy: IndexingPolicy,
+    vector_store: ComponentFingerprint | None,
+    sparse_index: ComponentFingerprint | None,
+) -> ComponentFingerprint:
+    """Bind policy and concrete index codecs without resource addresses or secrets."""
+
+    if not isinstance(policy, IndexingPolicy):
+        raise InvalidDomainValueError("policy must be an IndexingPolicy")
+    if vector_store is not None and not isinstance(vector_store, ComponentFingerprint):
+        raise InvalidDomainValueError("vector_store must be a ComponentFingerprint or None")
+    if sparse_index is not None and not isinstance(sparse_index, ComponentFingerprint):
+        raise InvalidDomainValueError("sparse_index must be a ComponentFingerprint or None")
+    return ComponentFingerprint.create(
+        "indexing",
+        "ragkit",
+        {
+            "version": 1,
+            "policy": str(policy.fingerprint),
+            "vector_store": None if vector_store is None else str(vector_store),
+            "sparse_index": None if sparse_index is None else str(sparse_index),
+        },
+    )
+
+
 class ChunkingStrategy(StrEnum):
     """Stable names for supported indexing-time chunking behaviors."""
 

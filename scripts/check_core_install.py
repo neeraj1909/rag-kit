@@ -18,6 +18,10 @@ MISSING_BOUNDARIES = {
     "hosted": "openai",
     "http": "uvicorn",
     "reranking": "transformers",
+    "pgvector": "psycopg",
+    "qdrant": "qdrant_client",
+    "pinecone": "pinecone",
+    "opensearch": "opensearchpy",
 }
 
 

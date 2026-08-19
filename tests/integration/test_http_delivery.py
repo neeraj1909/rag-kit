@@ -232,8 +232,10 @@ def test_index_and_ask_delegate_exactly_once_to_application_use_cases(
         "diagnostics": [],
         "documents": 1,
         "index_manifest_fingerprint": str(pipeline.manifest.fingerprint),
+        "indexing_strategy": "dense",
         "request_id": "client-123",
         "schema_version": "v1",
+        "vector_database": "memory",
     }
     assert len(pipeline.index_requests) == 1
     assert pipeline.index_requests[0].source_uri == "tests/fixtures/corpus"
@@ -288,6 +290,45 @@ def test_http_accepts_only_the_profile_bound_chunking_strategy(
         "code": "chunking_strategy_not_configured",
         "message": "chunking strategy is not configured by this profile",
     }
+
+
+def test_http_accepts_only_the_composed_indexing_and_database_selection(
+    app: tuple[HttpApp, StubPipeline, RecordingTelemetry],
+) -> None:
+    http, pipeline, _ = app
+    accepted = run_synchronous(
+        request(
+            http,
+            "POST",
+            "/v1/index",
+            body={
+                "source_uri": "tests/fixtures/corpus",
+                "indexing_strategy": "dense",
+                "vector_database": "memory",
+            },
+        )
+    )
+    rejected = run_synchronous(
+        request(
+            http,
+            "POST",
+            "/v1/index",
+            body={
+                "source_uri": "tests/fixtures/corpus",
+                "indexing_strategy": "hybrid",
+                "vector_database": "qdrant",
+            },
+        )
+    )
+
+    assert accepted[0] == 200
+    assert len(pipeline.index_requests) == 1
+    assert pipeline.index_requests[0].indexing_policy.strategy.value == "dense"
+    assert rejected[0] == 400
+    assert isinstance(rejected[2], dict)
+    error = rejected[2]["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "indexing_selection_not_configured"
 
 
 @pytest.mark.parametrize("source_uri", ["/etc/passwd", "tests/fixtures/corpus/../../.."])

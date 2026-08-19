@@ -125,6 +125,8 @@ def _index_and_ask(profile_path: Path, queries: tuple[str, ...]) -> tuple[object
             max_documents=limits.max_documents,
             max_parts_per_document=limits.max_parts_per_document,
             max_chunks=limits.max_chunks,
+            chunking_policy=runtime.chunking_policy,
+            indexing_policy=runtime.indexing_policy,
         )
     )
     answers = tuple(

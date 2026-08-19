@@ -21,7 +21,15 @@ from ragkit.application import (
 from ragkit.domain import InvalidDomainValueError, RagkitError, locator_to_dict
 from ragkit.infrastructure.bootstrap import OfflineRuntime, bootstrap, inspect_profile
 from ragkit.infrastructure.config import OfflineProfile, load_config
-from ragkit.ports import ChunkingStrategy, EvaluationCase, EvaluationExample, EvaluationRequest
+from ragkit.ports import (
+    ChunkingStrategy,
+    EvaluationCase,
+    EvaluationExample,
+    EvaluationRequest,
+    IndexingStrategy,
+    PhysicalIndexStrategy,
+    VectorDatabase,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -52,6 +60,21 @@ def _profile_arguments(parser: argparse.ArgumentParser) -> None:
         choices=tuple(strategy.value for strategy in ChunkingStrategy),
         help="override the profile's indexing-time chunking strategy",
     )
+    parser.add_argument(
+        "--indexing-strategy",
+        choices=tuple(strategy.value for strategy in IndexingStrategy),
+        help="override the logical dense, sparse, or hybrid indexing strategy",
+    )
+    parser.add_argument(
+        "--vector-database",
+        choices=tuple(database.value for database in VectorDatabase),
+        help="override the vector database selected during composition",
+    )
+    parser.add_argument(
+        "--physical-index-strategy",
+        choices=tuple(strategy.value for strategy in PhysicalIndexStrategy),
+        help="override the provider-compatible physical vector index",
+    )
 
 
 def _source(args: argparse.Namespace, profile: OfflineProfile) -> str:
@@ -71,6 +94,7 @@ def _index(runtime: OfflineRuntime, profile: OfflineProfile, source: str) -> Ind
             max_parts_per_document=limits.max_parts_per_document,
             max_chunks=limits.max_chunks,
             chunking_policy=runtime.chunking_policy,
+            indexing_policy=runtime.indexing_policy,
         )
     )
 
@@ -190,11 +214,56 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             ),
         )
 
+    selected_indexing = cast(str | None, args.indexing_strategy)
+    selected_database = cast(str | None, args.vector_database)
+    selected_physical = cast(str | None, args.physical_index_strategy)
+    if (
+        selected_indexing is not None
+        or selected_database is not None
+        or selected_physical is not None
+    ):
+        strategy = (
+            IndexingStrategy(selected_indexing)
+            if selected_indexing is not None
+            else IndexingStrategy(profile.components.retriever)
+        )
+        if strategy is IndexingStrategy.AUTO:
+            strategy = IndexingStrategy(profile.components.retriever)
+        database = (
+            VectorDatabase(selected_database)
+            if selected_database is not None
+            else VectorDatabase(profile.components.vector_store)
+        )
+        if strategy is IndexingStrategy.SPARSE:
+            if selected_database is not None and database is not VectorDatabase.NONE:
+                raise InvalidDomainValueError("sparse indexing requires --vector-database none")
+            database = VectorDatabase.NONE
+        profile = replace(
+            profile,
+            components=replace(
+                profile.components,
+                retriever=strategy.value,
+                vector_store=database.value,
+            ),
+            settings=replace(
+                profile.settings,
+                indexing_strategy=strategy,
+                physical_index_strategy=(
+                    PhysicalIndexStrategy(selected_physical)
+                    if selected_physical is not None
+                    else profile.settings.physical_index_strategy
+                ),
+            ),
+        )
+
     runtime = bootstrap(profile)
     source = _source(args, profile)
     index_result = _index(runtime, profile, source)
     if args.command == "index":
-        persistent = profile.components.vector_store == "sqlite"
+        persistent = runtime.indexing_policy.vector_database not in {
+            VectorDatabase.NONE,
+            VectorDatabase.MEMORY,
+        }
         return {
             "profile": profile.name,
             "documents": index_result.document_count,
@@ -205,6 +274,9 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "timings_ms": _timings(index_result.timings),
             "diagnostics": [item.code for item in index_result.diagnostics],
             "chunking_strategy": runtime.chunking_policy.strategy.value,
+            "indexing_strategy": runtime.indexing_policy.strategy.value,
+            "vector_database": runtime.indexing_policy.vector_database.value,
+            "physical_index_strategy": runtime.indexing_policy.physical_index.value,
         }
 
     if args.command == "ask":
@@ -227,12 +299,16 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
             "config_fingerprint": str(profile.fingerprint),
             "index_mode": (
                 "persistent_upserted_in_process"
-                if profile.components.vector_store == "sqlite"
+                if runtime.indexing_policy.vector_database
+                not in {VectorDatabase.NONE, VectorDatabase.MEMORY}
                 else "rebuilt_in_process"
             ),
             "timings_ms": timings,
             "diagnostics": [item.code for item in answer_result.diagnostics],
             "chunking_strategy": runtime.chunking_policy.strategy.value,
+            "indexing_strategy": runtime.indexing_policy.strategy.value,
+            "vector_database": runtime.indexing_policy.vector_database.value,
+            "physical_index_strategy": runtime.indexing_policy.physical_index.value,
         }
 
     examples = _load_dataset(cast(Path, args.dataset))
@@ -253,6 +329,9 @@ def _run(args: argparse.Namespace) -> dict[str, object]:
         "config_fingerprint": str(profile.fingerprint),
         "index_mode": "rebuilt_in_process",
         "chunking_strategy": runtime.chunking_policy.strategy.value,
+        "indexing_strategy": runtime.indexing_policy.strategy.value,
+        "vector_database": runtime.indexing_policy.vector_database.value,
+        "physical_index_strategy": runtime.indexing_policy.physical_index.value,
         "timings_ms": {
             "index_total": round(
                 sum(item.duration_ns for item in index_result.timings) / 1_000_000,

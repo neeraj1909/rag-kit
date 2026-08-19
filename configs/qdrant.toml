@@ -1,5 +1,5 @@
 [profile]
-name = "sparse"
+name = "qdrant-text"
 family = "text"
 source = "tests/fixtures/corpus"
 
@@ -10,8 +10,8 @@ extractor = "text"
 projector = "noop"
 chunker = "adaptive"
 embedder = "hashing"
-vector_store = "none"
-retriever = "sparse"
+vector_store = "qdrant"
+retriever = "dense"
 reranker = "noop"
 prompt_builder = "template"
 generator = "extractive"
@@ -31,7 +31,7 @@ max_context_chars = 2400
 max_output_tokens = 160
 
 [settings]
-bm25_k1 = 1.2
-bm25_b = 0.75
-bm25_token_pattern = "[^\\W_]+"
-bm25_lowercase = true
+indexing_strategy = "dense"
+physical_index_strategy = "hnsw"
+qdrant_url = "http://localhost:6333"
+collection_name = "ragkit"

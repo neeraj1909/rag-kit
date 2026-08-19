@@ -35,6 +35,8 @@ def main() -> int:
             limits.max_documents,
             limits.max_parts_per_document,
             limits.max_chunks,
+            chunking_policy=runtime.chunking_policy,
+            indexing_policy=runtime.indexing_policy,
         )
     )
     answer = runtime.pipeline.ask(

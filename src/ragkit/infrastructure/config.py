@@ -10,12 +10,17 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TypeVar, cast
 
-from ragkit.domain import ComponentFingerprint, InvalidDomainValueError
+from ragkit.domain import ComponentFingerprint, InvalidDomainValueError, UnsupportedCapabilityError
 from ragkit.ports import (
     ChunkingPolicy,
     ChunkingStrategy,
     DocumentFamily,
+    IndexingPolicy,
+    IndexingStrategy,
+    PhysicalIndexStrategy,
+    VectorDatabase,
     resolve_chunking_policy,
+    resolve_indexing_policy,
 )
 
 
@@ -118,8 +123,27 @@ class AdapterSettings:
     chunk_min_chars: int = 1
     chunk_semantic_threshold: float = 0.72
     chunk_include_parent_context: bool = True
+    indexing_strategy: IndexingStrategy = IndexingStrategy.AUTO
+    physical_index_strategy: PhysicalIndexStrategy = PhysicalIndexStrategy.AUTO
+    vector_timeout_seconds: float = 30.0
+    vector_max_retries: int = 2
+    vector_batch_size: int = 100
+    pgvector_dsn_env: str = "RAGKIT_PGVECTOR_DSN"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key_env: str = "QDRANT_API_KEY"
+    pinecone_index_host: str = ""
+    pinecone_namespace: str = "ragkit"
+    pinecone_api_key_env: str = "PINECONE_API_KEY"
+    opensearch_url: str = "http://localhost:9200"
+    opensearch_index: str = "ragkit"
+    opensearch_username_env: str = "OPENSEARCH_USERNAME"
+    opensearch_password_env: str = "OPENSEARCH_PASSWORD"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.indexing_strategy, IndexingStrategy):
+            raise InvalidDomainValueError("indexing_strategy must be a supported strategy")
+        if not isinstance(self.physical_index_strategy, PhysicalIndexStrategy):
+            raise InvalidDomainValueError("physical_index_strategy must be supported")
         if not isinstance(self.chunking_strategy, ChunkingStrategy):
             raise InvalidDomainValueError("chunking_strategy must be a supported strategy")
         if (
@@ -169,6 +193,15 @@ class AdapterSettings:
             self.bm25_token_pattern,
             self.hosted_model,
             self.credential_env,
+            self.pgvector_dsn_env,
+            self.qdrant_url,
+            self.qdrant_api_key_env,
+            self.pinecone_namespace,
+            self.pinecone_api_key_env,
+            self.opensearch_url,
+            self.opensearch_index,
+            self.opensearch_username_env,
+            self.opensearch_password_env,
         )
         if any(not value.strip() for value in strings):
             raise InvalidDomainValueError("adapter string settings must not be blank")
@@ -182,6 +215,15 @@ class AdapterSettings:
             raise InvalidDomainValueError("bm25_token_pattern must be a valid regex") from error
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.credential_env) is None:
             raise InvalidDomainValueError("credential_env must be an environment-variable name")
+        credential_names = (
+            self.pgvector_dsn_env,
+            self.qdrant_api_key_env,
+            self.pinecone_api_key_env,
+            self.opensearch_username_env,
+            self.opensearch_password_env,
+        )
+        if any(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item) is None for item in credential_names):
+            raise InvalidDomainValueError("provider credential settings must be environment names")
         revisions = (
             self.embedder_revision,
             self.vision_revision,
@@ -248,6 +290,17 @@ class AdapterSettings:
             )
         if type(self.max_retries) is not int or self.max_retries < 0:
             raise InvalidDomainValueError("max_retries must be a non-negative integer")
+        if (
+            type(self.vector_max_retries) is not int
+            or self.vector_max_retries < 0
+            or type(self.vector_batch_size) is not int
+            or not 1 <= self.vector_batch_size <= 1_000
+            or isinstance(self.vector_timeout_seconds, bool)
+            or not isinstance(self.vector_timeout_seconds, (int, float))
+            or not math.isfinite(self.vector_timeout_seconds)
+            or self.vector_timeout_seconds <= 0
+        ):
+            raise InvalidDomainValueError("vector retry, batch, and timeout settings are invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,6 +355,39 @@ class OfflineProfile:
                 include_parent_context=self.settings.chunk_include_parent_context,
             ),
         )
+
+    @property
+    def indexing_policy(self) -> IndexingPolicy:
+        """Resolve logical indexing and physical storage before composition."""
+
+        try:
+            database = VectorDatabase(self.components.vector_store)
+        except ValueError as error:
+            raise UnsupportedCapabilityError(
+                f"unsupported vector database {self.components.vector_store!r}",
+                capability=f"vector_database:{self.components.vector_store}",
+            ) from error
+        configured_strategy = self.settings.indexing_strategy
+        if configured_strategy is IndexingStrategy.AUTO:
+            try:
+                configured_strategy = IndexingStrategy(self.components.retriever)
+            except ValueError as error:
+                raise UnsupportedCapabilityError(
+                    f"unsupported retriever strategy {self.components.retriever!r}",
+                    capability=f"retriever:{self.components.retriever}",
+                ) from error
+        configured = IndexingPolicy(
+            strategy=configured_strategy,
+            vector_database=database,
+            physical_index=self.settings.physical_index_strategy,
+        )
+        resolved = resolve_indexing_policy(self.family, configured)
+        expected_retriever = resolved.strategy.value
+        if self.components.retriever != expected_retriever:
+            raise InvalidDomainValueError(
+                "retriever selection must match the resolved indexing strategy"
+            )
+        return resolved
 
 
 _T = TypeVar("_T")
@@ -523,6 +609,53 @@ def load_config(path: str | Path) -> OfflineProfile:
                 raw_settings.get(
                     "chunk_include_parent_context", defaults.chunk_include_parent_context
                 ),
+            ),
+            indexing_strategy=IndexingStrategy(
+                cast(str, raw_settings.get("indexing_strategy", defaults.indexing_strategy))
+            ),
+            physical_index_strategy=PhysicalIndexStrategy(
+                cast(
+                    str,
+                    raw_settings.get("physical_index_strategy", defaults.physical_index_strategy),
+                )
+            ),
+            vector_timeout_seconds=cast(
+                float,
+                raw_settings.get("vector_timeout_seconds", defaults.vector_timeout_seconds),
+            ),
+            vector_max_retries=cast(
+                int, raw_settings.get("vector_max_retries", defaults.vector_max_retries)
+            ),
+            vector_batch_size=cast(
+                int, raw_settings.get("vector_batch_size", defaults.vector_batch_size)
+            ),
+            pgvector_dsn_env=cast(
+                str, raw_settings.get("pgvector_dsn_env", defaults.pgvector_dsn_env)
+            ),
+            qdrant_url=cast(str, raw_settings.get("qdrant_url", defaults.qdrant_url)),
+            qdrant_api_key_env=cast(
+                str, raw_settings.get("qdrant_api_key_env", defaults.qdrant_api_key_env)
+            ),
+            pinecone_index_host=cast(
+                str, raw_settings.get("pinecone_index_host", defaults.pinecone_index_host)
+            ),
+            pinecone_namespace=cast(
+                str, raw_settings.get("pinecone_namespace", defaults.pinecone_namespace)
+            ),
+            pinecone_api_key_env=cast(
+                str, raw_settings.get("pinecone_api_key_env", defaults.pinecone_api_key_env)
+            ),
+            opensearch_url=cast(str, raw_settings.get("opensearch_url", defaults.opensearch_url)),
+            opensearch_index=cast(
+                str, raw_settings.get("opensearch_index", defaults.opensearch_index)
+            ),
+            opensearch_username_env=cast(
+                str,
+                raw_settings.get("opensearch_username_env", defaults.opensearch_username_env),
+            ),
+            opensearch_password_env=cast(
+                str,
+                raw_settings.get("opensearch_password_env", defaults.opensearch_password_env),
             ),
         )
     except (TypeError, ValueError) as error:

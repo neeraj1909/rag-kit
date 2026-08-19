@@ -169,6 +169,7 @@ supersedes its initial Chroma selection after an unpatched critical advisory.
 - [ADR 0004: Modality adapter baselines](docs/decisions/0004-modality-adapter-baselines.md)
 - [ADR 0005: Python packaging and tooling baseline](docs/decisions/0005-python-packaging-and-tooling.md)
 - [ADR 0006: SQLite persistent store](docs/decisions/0006-sqlite-persistent-store.md)
+- [ADR 0007: Indexing policy and vector-store portability](docs/decisions/0007-indexing-policy-and-vector-store-portability.md)
 
 [cosmic-repository]: https://www.cosmicpython.com/book/chapter_02_repository.html
 [cosmic-abstractions]: https://www.cosmicpython.com/book/chapter_03_abstractions.html

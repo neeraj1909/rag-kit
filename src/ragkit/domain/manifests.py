@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import StrEnum
 from types import MappingProxyType
 from typing import cast
 
 from .errors import IndexCompatibilityError, InvalidDomainValueError
 from .identity import ComponentFingerprint
+
+
+def _legacy_indexing_fingerprint() -> ComponentFingerprint:
+    return ComponentFingerprint.create(
+        "indexing_policy",
+        "ragkit",
+        {
+            "schema": "indexing-policy-v1",
+            "strategy": "dense",
+            "vector_database": "memory",
+            "physical_index": "exact",
+        },
+    )
 
 
 class NormalizationMode(StrEnum):
@@ -47,6 +60,7 @@ class IndexManifest:
     embedding_dimension: int
     normalization: NormalizationMode
     domain_schema_fingerprint: ComponentFingerprint
+    indexing_fingerprint: ComponentFingerprint = field(default_factory=_legacy_indexing_fingerprint)
 
     def __post_init__(self) -> None:
         if self.schema_version < 1 or self.embedding_dimension < 1:
@@ -65,6 +79,7 @@ class IndexManifest:
             "embedding_dimension": self.embedding_dimension,
             "normalization": self.normalization.value,
             "domain_schema_fingerprint": str(self.domain_schema_fingerprint),
+            "indexing_fingerprint": str(self.indexing_fingerprint),
         }
 
     @classmethod
@@ -77,6 +92,15 @@ class IndexManifest:
             cast(int, value["embedding_dimension"]),
             NormalizationMode(cast(str, value["normalization"])),
             ComponentFingerprint(cast(str, value["domain_schema_fingerprint"])),
+            ComponentFingerprint(
+                cast(
+                    str,
+                    value.get(
+                        "indexing_fingerprint",
+                        str(_legacy_indexing_fingerprint()),
+                    ),
+                )
+            ),
         )
 
     def require_compatible(self, actual: IndexManifest) -> None:
@@ -91,9 +115,9 @@ def compare_manifests(
     """Return non-secret field-level differences between two manifests."""
 
     differences: dict[str, tuple[object, object]] = {}
-    for field in fields(IndexManifest):
-        expected_value = getattr(expected, field.name)
-        actual_value = getattr(actual, field.name)
+    for manifest_field in fields(IndexManifest):
+        expected_value = getattr(expected, manifest_field.name)
+        actual_value = getattr(actual, manifest_field.name)
         if expected_value != actual_value:
-            differences[field.name] = (expected_value, actual_value)
+            differences[manifest_field.name] = (expected_value, actual_value)
     return differences

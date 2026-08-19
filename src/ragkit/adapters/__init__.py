@@ -17,10 +17,15 @@ from .modality_chunking import ModalityChunker
 from .multimodal import EvidenceChunker
 from .observability import InMemoryTelemetry, JsonLinesTelemetry, RequestCorrelatedTelemetry
 from .ocr import OcrDocumentExtractor
+from .opensearch_store import OpenSearchVectorStore
+from .pgvector_store import PgVectorStore
+from .pinecone_store import PineconeVectorStore
+from .qdrant_store import QdrantVectorStore
 from .retrieval import (
     BM25Config,
     BM25Retriever,
     DenseRetriever,
+    DisabledEmbedder,
     HashingEmbedder,
     HybridRetriever,
     InMemoryVectorStore,
@@ -46,6 +51,7 @@ __all__ = [
     "DeclaredFamilyClassifier",
     "DenseRetriever",
     "DeterministicEvaluator",
+    "DisabledEmbedder",
     "EvidenceChunker",
     "ExtractiveGenerator",
     "FilesystemSourceConnector",
@@ -65,7 +71,11 @@ __all__ = [
     "NoOpReranker",
     "OcrDocumentExtractor",
     "OpenAIHostedGenerator",
+    "OpenSearchVectorStore",
+    "PgVectorStore",
+    "PineconeVectorStore",
     "PySceneDetectBackend",
+    "QdrantVectorStore",
     "RequestCorrelatedTelemetry",
     "SQLiteVectorStore",
     "StructureAwareChunker",

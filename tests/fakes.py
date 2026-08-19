@@ -220,6 +220,9 @@ class FakeVectorStore(VectorStore):
         if expected != self._manifest:
             expected.require_compatible(self._manifest)
 
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        self._require_manifest(manifest)
+
     def upsert(self, request: UpsertRequest) -> None:
         self._require_manifest(request.manifest)
         if self._manifest is None:

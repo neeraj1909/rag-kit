@@ -59,6 +59,12 @@ the chunker fingerprint before manifest construction. An explicit request policy
 that differs from the bound policy fails before index mutation; no adapter may
 silently substitute a strategy. See [Chunking strategies](chunking-strategies.md).
 
+`IndexingRequest.indexing_policy` selects dense, sparse, or hybrid
+materialization. Composition resolves it, validates the chosen database and
+physical index, and binds the policy fingerprint into `IndexManifest`. A
+mismatch fails before acquisition. Provider selection remains behind
+`VectorStore`; see [Indexing strategies](indexing-strategies.md).
+
 An upsert batch and query vector carry the embedder fingerprint that produced
 them. Their fingerprint, dimension, and normalization must match the index
 manifest before the vector-store adapter is called. Rerank requests reject

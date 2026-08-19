@@ -20,6 +20,10 @@ REQUIRED_EXTRAS = {
     "hosted",
     "http",
     "reranking",
+    "pgvector",
+    "qdrant",
+    "pinecone",
+    "opensearch",
 }
 
 
@@ -59,6 +63,7 @@ def test_ci_builds_archives_and_covers_each_python_extra_pair() -> None:
     assert ".venv-release/bin/ragkit-http --help" in workflow
     assert "scripts/check_core_install.py" in workflow
     assert "*.tar.gz" in workflow
+    assert "timeout 180 sudo apt-get" in workflow
 
 
 @pytest.mark.contract

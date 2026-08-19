@@ -53,6 +53,13 @@ reranking = [
   "torch>=2.7,<3",
   "transformers>=4.57,<6",
 ]
+pgvector = [
+  "pgvector>=0.5,<1",
+  "psycopg[binary]>=3.2,<4",
+]
+qdrant = ["qdrant-client>=1.18,<2"]
+pinecone = ["pinecone>=9.1,<10"]
+opensearch = ["opensearch-py>=3.2,<4"]
 
 [dependency-groups]
 dev = [

@@ -1,5 +1,5 @@
 [profile]
-name = "sparse"
+name = "pinecone-text"
 family = "text"
 source = "tests/fixtures/corpus"
 
@@ -10,8 +10,8 @@ extractor = "text"
 projector = "noop"
 chunker = "adaptive"
 embedder = "hashing"
-vector_store = "none"
-retriever = "sparse"
+vector_store = "pinecone"
+retriever = "dense"
 reranker = "noop"
 prompt_builder = "template"
 generator = "extractive"
@@ -31,7 +31,8 @@ max_context_chars = 2400
 max_output_tokens = 160
 
 [settings]
-bm25_k1 = 1.2
-bm25_b = 0.75
-bm25_token_pattern = "[^\\W_]+"
-bm25_lowercase = true
+indexing_strategy = "dense"
+physical_index_strategy = "managed"
+pinecone_index_host = "https://replace-with-index-host"
+pinecone_namespace = "ragkit"
+pinecone_api_key_env = "PINECONE_API_KEY"

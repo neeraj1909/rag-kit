@@ -16,6 +16,7 @@ from ragkit.adapters import (
     DeclaredFamilyClassifier,
     DenseRetriever,
     DeterministicEvaluator,
+    DisabledEmbedder,
     ExtractiveGenerator,
     FilesystemSourceConnector,
     HashingEmbedder,
@@ -32,7 +33,11 @@ from ragkit.adapters import (
     NoOpReranker,
     OcrDocumentExtractor,
     OpenAIHostedGenerator,
+    OpenSearchVectorStore,
+    PgVectorStore,
+    PineconeVectorStore,
     PySceneDetectBackend,
+    QdrantVectorStore,
     SQLiteVectorStore,
     TemplatePromptBuilder,
     TextDocumentExtractor,
@@ -57,6 +62,8 @@ from ragkit.ports import (
     Evaluator,
     FamilyClassifier,
     Generator,
+    IndexingPolicy,
+    IndexingStrategy,
     PromptBuilder,
     Reranker,
     Retriever,
@@ -83,6 +90,8 @@ class OfflineRuntime:
     embedder_fingerprint: ComponentFingerprint
     embedding_dimension: int
     chunking_policy: ChunkingPolicy
+    indexing_policy: IndexingPolicy
+    indexing_fingerprint: ComponentFingerprint
 
     def manifest_for(self, source_uri: str) -> IndexManifest:
         """Describe index semantics for one logical corpus acquisition address."""
@@ -91,7 +100,7 @@ class OfflineRuntime:
             raise InvalidDomainValueError("source URI must not be blank")
         canonical_source_uri = _canonical_filesystem_uri(source_uri)
         return IndexManifest(
-            schema_version=1,
+            schema_version=2,
             corpus_fingerprint=ComponentFingerprint.create(
                 "corpus",
                 "filesystem-source",
@@ -107,6 +116,7 @@ class OfflineRuntime:
             domain_schema_fingerprint=ComponentFingerprint.create(
                 "domain_schema", "ragkit", {"version": 1}
             ),
+            indexing_fingerprint=self.indexing_fingerprint,
         )
 
 
@@ -128,6 +138,12 @@ def _unsupported(role: str, selection: str) -> UnsupportedCapabilityError:
         f"ragkit does not implement {role} selection {selection!r}",
         capability=f"{role}:{selection}",
     )
+
+
+def _require_dense_retriever(retriever: DenseRetriever | None) -> DenseRetriever:
+    if retriever is None:
+        raise InvalidDomainValueError("dense retrieval requires a vector database")
+    return retriever
 
 
 def _select(registry: dict[str, Callable[[], T]], role: str, selection: str) -> T:
@@ -234,8 +250,10 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
                 OptionalCapability("media", "cv2", distribution="opencv-python"),
             )
         )
-    if profile.components.embedder == "torch" and not any(
-        item.extra == "vision" for item in requirements
+    if (
+        profile.indexing_policy.strategy in {IndexingStrategy.DENSE, IndexingStrategy.HYBRID}
+        and profile.components.embedder == "torch"
+        and not any(item.extra == "vision" for item in requirements)
     ):
         requirements.extend(
             (
@@ -266,6 +284,22 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
         requirements.append(
             OptionalCapability("hosted", "openai", credential_env=profile.settings.credential_env)
         )
+    vector_requirements = {
+        "pgvector": (
+            OptionalCapability(
+                "pgvector", "psycopg", credential_env=profile.settings.pgvector_dsn_env
+            ),
+            OptionalCapability("pgvector", "pgvector"),
+        ),
+        "qdrant": (OptionalCapability("qdrant", "qdrant_client"),),
+        "pinecone": (
+            OptionalCapability(
+                "pinecone", "pinecone", credential_env=profile.settings.pinecone_api_key_env
+            ),
+        ),
+        "opensearch": (OptionalCapability("opensearch", "opensearchpy"),),
+    }
+    requirements.extend(vector_requirements.get(profile.components.vector_store, ()))
 
     component_values = asdict(profile.components)
     selection_fingerprints = {
@@ -288,6 +322,7 @@ def inspect_profile(profile: OfflineProfile) -> dict[str, object]:
     return {
         "supported_families": [family.value for family in DocumentFamily],
         "selected_family": profile.family.value,
+        "indexing_policy": profile.indexing_policy.fingerprint_inputs(),
         "selection_fingerprints": selection_fingerprints,
         "device": profile.settings.device,
         "limits": {
@@ -320,6 +355,7 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
 
     _validate_family_selections(profile)
     chunking_policy = profile.chunking_policy
+    indexing_policy = profile.indexing_policy
     components = profile.components
     connector: SourceConnector = _select(
         {"filesystem": FilesystemSourceConnector}, "connector", components.connector
@@ -402,32 +438,100 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
         "chunker",
         components.chunker,
     )
-    embedder: Embedder = _select(
-        {
-            "hashing": lambda: HashingEmbedder(profile.limits.embedding_dimension),
-            "torch": lambda: TorchTextEmbedder(
-                model_id=profile.settings.embedder_model_id,
-                revision=profile.settings.embedder_revision,
-                device=profile.settings.device,
-                batch_size=profile.settings.batch_size,
-                max_length=profile.settings.max_length,
-                pooling=profile.settings.pooling,
-            ),
-        },
-        "embedder",
-        components.embedder,
-    )
-    vector_store: VectorStore = _select(
-        {
-            "memory": InMemoryVectorStore,
-            "sqlite": lambda: SQLiteVectorStore(
-                profile.settings.persistence_path, profile.settings.collection_name
-            ),
-        },
-        "vector_store",
-        components.vector_store,
-    )
-    dense_retriever = DenseRetriever(embedder, vector_store)
+    embedder: Embedder
+    if indexing_policy.strategy is IndexingStrategy.SPARSE:
+        embedder = DisabledEmbedder()
+    else:
+        embedder = _select(
+            {
+                "hashing": lambda: HashingEmbedder(profile.limits.embedding_dimension),
+                "torch": lambda: TorchTextEmbedder(
+                    model_id=profile.settings.embedder_model_id,
+                    revision=profile.settings.embedder_revision,
+                    device=profile.settings.device,
+                    batch_size=profile.settings.batch_size,
+                    max_length=profile.settings.max_length,
+                    pooling=profile.settings.pooling,
+                ),
+            },
+            "embedder",
+            components.embedder,
+        )
+    vector_store: VectorStore | None = None
+    if indexing_policy.strategy in {IndexingStrategy.DENSE, IndexingStrategy.HYBRID}:
+
+        def pgvector_store() -> VectorStore:
+            dsn = os.environ.get(profile.settings.pgvector_dsn_env)
+            if not dsn:
+                raise UnsupportedCapabilityError(
+                    f"pgvector requires environment variable {profile.settings.pgvector_dsn_env}",
+                    capability="pgvector_credential",
+                )
+            return PgVectorStore.from_dsn(
+                dsn,
+                profile.settings.collection_name,
+                physical_index_policy=indexing_policy.physical_index.value,
+                max_batch_size=profile.settings.vector_batch_size,
+                max_top_k=profile.limits.max_chunks,
+            )
+
+        def qdrant_store() -> VectorStore:
+            return QdrantVectorStore.from_url(
+                profile.settings.qdrant_url,
+                profile.settings.collection_name,
+                api_key=os.environ.get(profile.settings.qdrant_api_key_env),
+                timeout_seconds=profile.settings.vector_timeout_seconds,
+                max_batch_size=profile.settings.vector_batch_size,
+                max_top_k=profile.limits.max_chunks,
+            )
+
+        def pinecone_store() -> VectorStore:
+            key = os.environ.get(profile.settings.pinecone_api_key_env)
+            if not key:
+                raise UnsupportedCapabilityError(
+                    "Pinecone requires environment variable "
+                    f"{profile.settings.pinecone_api_key_env}",
+                    capability="pinecone_credential",
+                )
+            return PineconeVectorStore(
+                index_host=profile.settings.pinecone_index_host,
+                namespace=profile.settings.pinecone_namespace,
+                api_key=key,
+                timeout_seconds=profile.settings.vector_timeout_seconds,
+                max_retries=profile.settings.vector_max_retries,
+                batch_size=profile.settings.vector_batch_size,
+                max_top_k=profile.limits.max_chunks,
+            )
+
+        def opensearch_store() -> VectorStore:
+            username = os.environ.get(profile.settings.opensearch_username_env)
+            password = os.environ.get(profile.settings.opensearch_password_env)
+            return OpenSearchVectorStore(
+                url=profile.settings.opensearch_url,
+                index_name=profile.settings.opensearch_index,
+                username=username,
+                password=password,
+                timeout_seconds=profile.settings.vector_timeout_seconds,
+                max_retries=profile.settings.vector_max_retries,
+                batch_size=profile.settings.vector_batch_size,
+                max_top_k=profile.limits.max_chunks,
+            )
+
+        vector_store = _select(
+            {
+                "memory": InMemoryVectorStore,
+                "sqlite": lambda: SQLiteVectorStore(
+                    profile.settings.persistence_path, profile.settings.collection_name
+                ),
+                "pgvector": pgvector_store,
+                "qdrant": qdrant_store,
+                "pinecone": pinecone_store,
+                "opensearch": opensearch_store,
+            },
+            "vector_store",
+            components.vector_store,
+        )
+    dense_retriever = DenseRetriever(embedder, vector_store) if vector_store is not None else None
     bm25_retriever = BM25Retriever(
         config=BM25Config(
             k1=profile.settings.bm25_k1,
@@ -438,10 +542,10 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
     )
     retriever: Retriever = _select(
         {
-            "dense": lambda: dense_retriever,
+            "dense": lambda: _require_dense_retriever(dense_retriever),
             "sparse": lambda: bm25_retriever,
             "hybrid": lambda: HybridRetriever(
-                (("dense", dense_retriever), ("sparse", bm25_retriever)),
+                (("dense", _require_dense_retriever(dense_retriever)), ("sparse", bm25_retriever)),
                 rrf_k=profile.settings.hybrid_rrf_k,
                 candidate_multiplier=profile.settings.hybrid_candidate_multiplier,
                 max_candidates=profile.limits.max_chunks,
@@ -511,6 +615,7 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
         vector_store,
         selected_telemetry,
         sparse_index=sparse_index,
+        indexing_policy=indexing_policy,
     )
     answering = AnsweringService(
         retriever,
@@ -529,4 +634,6 @@ def bootstrap(profile: OfflineProfile, *, telemetry: Telemetry | None = None) ->
         embedder_fingerprint=embedder.fingerprint,
         embedding_dimension=embedder.dimension,
         chunking_policy=chunking_policy,
+        indexing_policy=indexing_policy,
+        indexing_fingerprint=indexing.indexing_fingerprint,
     )

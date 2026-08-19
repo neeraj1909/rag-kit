@@ -11,6 +11,7 @@ from ragkit.domain import (
     CellLocator,
     Chunk,
     ChunkId,
+    ComponentFingerprint,
     Document,
     ExtractionProvenance,
     IndexCompatibilityError,
@@ -30,11 +31,14 @@ from ragkit.ports import (
     ChunkingPolicy,
     ChunkingRequest,
     DocumentExtractor,
+    DocumentFamily,
     DocumentProjector,
     Embedder,
     EmbeddingRequest,
     ExtractionRequest,
     FamilyClassifier,
+    IndexingPolicy,
+    IndexingStrategy,
     ProjectionRequest,
     SourceConnector,
     SourceRequest,
@@ -43,6 +47,8 @@ from ragkit.ports import (
     Telemetry,
     UpsertRequest,
     VectorStore,
+    derive_indexing_fingerprint,
+    resolve_indexing_policy,
 )
 
 from ._telemetry import PipelineDiagnostic, StageTiming, invoke_timed
@@ -65,6 +71,7 @@ class IndexingRequest:
     max_parts_per_document: int = 10_000
     max_chunks: int = 100_000
     chunking_policy: ChunkingPolicy = field(default_factory=ChunkingPolicy)
+    indexing_policy: IndexingPolicy = field(default_factory=IndexingPolicy)
 
     def __post_init__(self) -> None:
         if not self.source_uri.strip():
@@ -74,6 +81,8 @@ class IndexingRequest:
         _positive(self.max_documents, "max_documents")
         _positive(self.max_parts_per_document, "max_parts_per_document")
         _positive(self.max_chunks, "max_chunks")
+        if not isinstance(self.indexing_policy, IndexingPolicy):
+            raise InvalidDomainValueError("indexing_policy must be an IndexingPolicy")
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,10 +131,11 @@ class IndexingService:
         projector: DocumentProjector,
         chunker: Chunker,
         embedder: Embedder,
-        vector_store: VectorStore,
+        vector_store: VectorStore | None,
         telemetry: Telemetry,
         *,
         sparse_index: SparseIndex | None = None,
+        indexing_policy: IndexingPolicy | None = None,
         clock: Callable[[], int] = perf_counter_ns,
     ) -> None:
         self._connector = connector
@@ -137,12 +147,32 @@ class IndexingService:
         self._vector_store = vector_store
         self._telemetry = telemetry
         self._sparse_index = sparse_index
+        self._indexing_policy = resolve_indexing_policy(
+            DocumentFamily.TEXT, indexing_policy or IndexingPolicy()
+        )
+        self._indexing_fingerprint = derive_indexing_fingerprint(
+            self._indexing_policy,
+            None if vector_store is None else vector_store.fingerprint,
+            None if sparse_index is None else sparse_index.fingerprint,
+        )
         self._clock = clock
+        self._require_indexing_components()
+
+    @property
+    def indexing_fingerprint(self) -> ComponentFingerprint:
+        """Identify the resolved policy and concrete dense/sparse index codecs."""
+
+        return self._indexing_fingerprint
 
     def run(self, request: IndexingRequest) -> IndexingResult:
         """Acquire, classify, extract, project, chunk, embed, then upsert."""
 
         self._require_manifest_components(request.manifest)
+        requested_policy = resolve_indexing_policy(DocumentFamily.TEXT, request.indexing_policy)
+        if requested_policy != self._indexing_policy:
+            raise InvalidDomainValueError(
+                "request indexing policy does not match the composed indexing policy"
+            )
         timings: list[StageTiming] = []
         assets = invoke_timed(
             "index.fetch",
@@ -223,30 +253,43 @@ class IndexingService:
                 timings,
             )
         self._require_resolved_chunks(projected, chunks)
+        self._require_store_compatibility(request.manifest)
 
-        embeddings = invoke_timed(
-            "index.embed",
-            lambda: self._embedder.embed_documents(
-                EmbeddingRequest(tuple(chunk.text for chunk in chunks))
-            ),
-            self._telemetry,
-            self._clock,
-            timings,
-            component=self._embedder,
-            count=lambda batch: len(batch.embeddings),
-        )
-        upsert = UpsertRequest(chunks, embeddings, request.manifest)
-        invoke_timed(
-            "index.upsert",
-            lambda: self._vector_store.upsert(upsert),
-            self._telemetry,
-            self._clock,
-            timings,
-            component=self._vector_store,
-            count=lambda _result: len(chunks),
-        )
-        sparse_index = self._sparse_index
-        if sparse_index is not None:
+        if self._indexing_policy.strategy in {
+            IndexingStrategy.DENSE,
+            IndexingStrategy.HYBRID,
+        }:
+            embeddings = invoke_timed(
+                "index.embed",
+                lambda: self._embedder.embed_documents(
+                    EmbeddingRequest(tuple(chunk.text for chunk in chunks))
+                ),
+                self._telemetry,
+                self._clock,
+                timings,
+                component=self._embedder,
+                count=lambda batch: len(batch.embeddings),
+            )
+            upsert = UpsertRequest(chunks, embeddings, request.manifest)
+            vector_store = self._vector_store
+            if vector_store is None:  # Constructor validation makes this unreachable.
+                raise IntegrityError("dense indexing requires a vector store")
+            invoke_timed(
+                "index.upsert",
+                lambda: vector_store.upsert(upsert),
+                self._telemetry,
+                self._clock,
+                timings,
+                component=vector_store,
+                count=lambda _result: len(chunks),
+            )
+        if self._indexing_policy.strategy in {
+            IndexingStrategy.SPARSE,
+            IndexingStrategy.HYBRID,
+        }:
+            sparse_index = self._sparse_index
+            if sparse_index is None:  # Constructor validation makes this unreachable.
+                raise IntegrityError("sparse indexing requires a sparse index")
             invoke_timed(
                 "index.sparse_upsert",
                 lambda: sparse_index.upsert(SparseUpsertRequest(chunks, request.manifest)),
@@ -287,8 +330,36 @@ class IndexingService:
                 manifest.embedding_dimension,
                 self._embedder.dimension,
             )
+        if manifest.indexing_fingerprint != self._indexing_fingerprint:
+            differences["indexing_fingerprint"] = (
+                manifest.indexing_fingerprint,
+                self._indexing_fingerprint,
+            )
         if differences:
             raise IndexCompatibilityError(differences)
+
+    def _require_indexing_components(self) -> None:
+        strategy = self._indexing_policy.strategy
+        has_vector = self._vector_store is not None
+        has_sparse = self._sparse_index is not None
+        expected = {
+            IndexingStrategy.DENSE: (True, False),
+            IndexingStrategy.SPARSE: (False, True),
+            IndexingStrategy.HYBRID: (True, True),
+        }[strategy]
+        if (has_vector, has_sparse) != expected:
+            raise InvalidDomainValueError(
+                f"indexing policy {strategy.value!r} requires "
+                f"vector_store={expected[0]} and sparse_index={expected[1]}"
+            )
+
+    def _require_store_compatibility(self, manifest: IndexManifest) -> None:
+        """Preflight every selected index before the first pipeline effect."""
+
+        if self._vector_store is not None:
+            self._vector_store.require_compatible(manifest)
+        if self._sparse_index is not None:
+            self._sparse_index.require_compatible(manifest)
 
     @staticmethod
     def _require_acquired_assets(

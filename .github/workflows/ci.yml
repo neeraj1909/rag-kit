@@ -26,7 +26,8 @@ jobs:
           uv run python scripts/check_package.py \
             --wheel "$wheel" --sdist "$sdist" \
             --extra text --extra ocr --extra layout --extra vision \
-            --extra media --extra persistent --extra hosted --extra http --extra reranking
+            --extra media --extra persistent --extra hosted --extra http --extra reranking \
+            --extra pgvector --extra qdrant --extra pinecone --extra opensearch
       - name: Upload release archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -78,7 +79,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-        extra: [text, ocr, layout, vision, media, persistent, hosted, http, reranking]
+        extra: [text, ocr, layout, vision, media, persistent, hosted, http, reranking, pgvector, qdrant, pinecone, opensearch]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -152,7 +153,7 @@ jobs:
           enable-cache: true
           python-version: "3.12"
       - name: Install OCR system dependency
-        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+        run: timeout 180 sudo apt-get update -qq && timeout 180 sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
       - name: Install all locked optional boundaries
         run: uv sync --frozen --group dev --all-extras
       - name: Coverage without implicit model downloads

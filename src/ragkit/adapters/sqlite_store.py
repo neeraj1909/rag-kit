@@ -64,6 +64,27 @@ class SQLiteVectorStore(VectorStore):
     def fingerprint(self) -> ComponentFingerprint:
         return self._fingerprint
 
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        self._validate_manifest(manifest)
+        if not self._path.is_file():
+            return
+        connection = self._connect(create=False, expected=manifest)
+        try:
+            try:
+                actual = self._read_manifest(connection)
+            except sqlite3.OperationalError as error:
+                if "no such table" not in str(error).casefold():
+                    raise
+                actual = None
+            if actual is not None:
+                manifest.require_compatible(actual)
+        except IndexCompatibilityError:
+            raise
+        except sqlite3.Error as error:
+            raise ProviderError("SQLite compatibility check failed", cause=error) from error
+        finally:
+            connection.close()
+
     def upsert(self, request: UpsertRequest) -> None:
         self._validate_manifest(request.manifest)
         if any(

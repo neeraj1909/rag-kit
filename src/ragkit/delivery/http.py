@@ -153,22 +153,21 @@ class HttpApp:
         if path == "/v1/index":
             self._require_method(method, "POST")
             body = await self._json_body(receive)
-            if set(body) not in ({"source_uri"}, {"source_uri", "chunking_strategy"}):
+            if not self._valid_index_schema(body, required={"source_uri"}):
                 raise _HttpFailure(400, "invalid_schema", "request schema is invalid")
             source_uri = self._authorized_source(self._body_string(body, "source_uri"))
             self._require_chunking_strategy(body)
+            self._require_indexing_selection(body)
             return 200, self._index(source_uri, request_id)
         if path == "/v1/ask":
             self._require_method(method, "POST")
             body = await self._json_body(receive)
-            if set(body) not in (
-                {"query", "source_uri"},
-                {"query", "source_uri", "chunking_strategy"},
-            ):
+            if not self._valid_index_schema(body, required={"query", "source_uri"}):
                 raise _HttpFailure(400, "invalid_schema", "request schema is invalid")
             query = self._body_string(body, "query")
             source_uri = self._authorized_source(self._body_string(body, "source_uri"))
             self._require_chunking_strategy(body)
+            self._require_indexing_selection(body)
             return 200, self._ask(query, source_uri, request_id)
         raise _HttpFailure(404, "not_found", "route not found")
 
@@ -195,6 +194,29 @@ class HttpApp:
                 "chunking strategy is not configured by this profile",
             )
 
+    @staticmethod
+    def _valid_index_schema(body: dict[str, object], *, required: set[str]) -> bool:
+        optional = {"chunking_strategy", "indexing_strategy", "vector_database"}
+        return required.issubset(body) and set(body).issubset(required | optional)
+
+    def _require_indexing_selection(self, body: dict[str, object]) -> None:
+        expected = {
+            "indexing_strategy": self._profile.indexing_policy.strategy.value,
+            "vector_database": self._profile.indexing_policy.vector_database.value,
+        }
+        for field, configured in expected.items():
+            requested = body.get(field)
+            if requested is None:
+                continue
+            if not isinstance(requested, str) or not requested.strip():
+                raise _HttpFailure(400, "invalid_schema", "request schema is invalid")
+            if requested != configured:
+                raise _HttpFailure(
+                    400,
+                    "indexing_selection_not_configured",
+                    "indexing selection is not configured by this profile",
+                )
+
     def _index(self, source_uri: str, request_id: str) -> dict[str, object]:
         limits = self._profile.limits
         result = self._pipeline.index(
@@ -207,6 +229,7 @@ class HttpApp:
                 max_parts_per_document=limits.max_parts_per_document,
                 max_chunks=limits.max_chunks,
                 chunking_policy=self._profile.chunking_policy,
+                indexing_policy=self._profile.indexing_policy,
             )
         )
         return self._base_payload(
@@ -216,6 +239,8 @@ class HttpApp:
                 "chunks": result.chunk_count,
                 "index_manifest_fingerprint": str(result.manifest.fingerprint),
                 "diagnostics": [item.code for item in result.diagnostics],
+                "indexing_strategy": self._profile.indexing_policy.strategy.value,
+                "vector_database": self._profile.indexing_policy.vector_database.value,
             },
         )
 

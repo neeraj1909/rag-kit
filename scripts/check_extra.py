@@ -23,6 +23,10 @@ EXTRA_IMPORTS: dict[str, tuple[str, ...]] = {
     "hosted": ("openai", "ragkit.adapters.hosted"),
     "http": ("uvicorn", "ragkit.delivery.http", "ragkit.delivery.server"),
     "reranking": ("torch", "transformers", "ragkit.adapters.cross_encoder_reranker"),
+    "pgvector": ("psycopg", "pgvector", "ragkit.adapters.pgvector_store"),
+    "qdrant": ("qdrant_client", "ragkit.adapters.qdrant_store"),
+    "pinecone": ("pinecone", "ragkit.adapters.pinecone_store"),
+    "opensearch": ("opensearchpy", "ragkit.adapters.opensearch_store"),
 }
 
 EXTRA_DISTRIBUTIONS: dict[str, tuple[str, ...]] = {
@@ -35,6 +39,10 @@ EXTRA_DISTRIBUTIONS: dict[str, tuple[str, ...]] = {
     "hosted": ("openai",),
     "http": ("uvicorn",),
     "reranking": ("torch", "transformers"),
+    "pgvector": ("psycopg", "pgvector"),
+    "qdrant": ("qdrant-client",),
+    "pinecone": ("pinecone",),
+    "opensearch": ("opensearch-py",),
 }
 
 

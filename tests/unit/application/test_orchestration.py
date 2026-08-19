@@ -62,6 +62,9 @@ from ragkit.ports import (
     GenerationRequest,
     GenerationResult,
     Generator,
+    IndexingPolicy,
+    IndexingStrategy,
+    PhysicalIndexStrategy,
     ProjectionRequest,
     Prompt,
     PromptBuilder,
@@ -79,8 +82,11 @@ from ragkit.ports import (
     TelemetryOutcome,
     TokenUsage,
     UpsertRequest,
+    VectorDatabase,
     VectorSearchRequest,
     VectorStore,
+    derive_indexing_fingerprint,
+    resolve_indexing_policy,
 )
 
 pytestmark = pytest.mark.unit
@@ -90,7 +96,10 @@ def fingerprint(kind: str) -> ComponentFingerprint:
     return ComponentFingerprint.create(kind, "application_test", {"version": 1})
 
 
-def manifest() -> IndexManifest:
+def manifest(indexing_policy: IndexingPolicy | None = None) -> IndexManifest:
+    resolved_policy = indexing_policy or resolve_indexing_policy(
+        DocumentFamily.TEXT, IndexingPolicy()
+    )
     return IndexManifest(
         schema_version=1,
         corpus_fingerprint=fingerprint("corpus"),
@@ -99,6 +108,26 @@ def manifest() -> IndexManifest:
         embedding_dimension=2,
         normalization=NormalizationMode.NONE,
         domain_schema_fingerprint=fingerprint("domain_schema"),
+        indexing_fingerprint=derive_indexing_fingerprint(
+            resolved_policy,
+            None
+            if resolved_policy.strategy is IndexingStrategy.SPARSE
+            else fingerprint("vector_store"),
+            fingerprint("sparse_index")
+            if resolved_policy.strategy in {IndexingStrategy.SPARSE, IndexingStrategy.HYBRID}
+            else None,
+        ),
+    )
+
+
+def hybrid_indexing_policy() -> IndexingPolicy:
+    return resolve_indexing_policy(
+        DocumentFamily.TEXT,
+        IndexingPolicy(
+            IndexingStrategy.HYBRID,
+            VectorDatabase.MEMORY,
+            PhysicalIndexStrategy.EXACT,
+        ),
     )
 
 
@@ -407,6 +436,9 @@ class RecordingStore(VectorStore):
     def fingerprint(self) -> ComponentFingerprint:
         return fingerprint("vector_store")
 
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        self.calls.append("vector_preflight")
+
     def upsert(self, request: UpsertRequest) -> None:
         self.calls.append("upsert")
         self.upsert_request = request
@@ -424,6 +456,13 @@ class RecordingSparseIndex(SparseIndex):
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
         self.upsert_request: SparseUpsertRequest | None = None
+
+    @property
+    def fingerprint(self) -> ComponentFingerprint:
+        return fingerprint("sparse_index")
+
+    def require_compatible(self, manifest: IndexManifest) -> None:
+        self.calls.append("sparse_preflight")
 
     def upsert(self, request: SparseUpsertRequest) -> None:
         self.calls.append("sparse_upsert")
@@ -545,6 +584,7 @@ def indexing_service(
 ) -> tuple[IndexingService, RecordingStore, RecordingSparseIndex | None, RecordingTelemetry]:
     store = RecordingStore(calls)
     sparse_index = RecordingSparseIndex(calls) if with_sparse_index else None
+    indexing_policy = hybrid_indexing_policy() if with_sparse_index else None
     telemetry = RecordingTelemetry(calls)
     return (
         IndexingService(
@@ -557,6 +597,7 @@ def indexing_service(
             store,
             telemetry,
             sparse_index=sparse_index,
+            indexing_policy=indexing_policy,
             clock=StepClock(),
         ),
         store,
@@ -580,6 +621,7 @@ def test_indexing_sequences_every_family_through_manifest_checked_upsert(
         "extract",
         "project",
         "chunk",
+        "vector_preflight",
         "embed_documents",
         "upsert",
     ]
@@ -622,7 +664,14 @@ def test_indexing_updates_sparse_index_with_the_same_chunks_and_manifest() -> No
         calls, DocumentFamily.TEXT, with_sparse_index=True
     )
 
-    result = service.run(IndexingRequest("memory://fixture", manifest()))
+    policy = hybrid_indexing_policy()
+    result = service.run(
+        IndexingRequest(
+            "memory://fixture",
+            manifest(policy),
+            indexing_policy=policy,
+        )
+    )
 
     assert result.chunk_count == 1
     assert store.upsert_request is not None
@@ -817,11 +866,19 @@ def test_indexing_rejects_invalid_chunk_identity_before_any_store_mutation() -> 
         RecordingStore(calls),
         RecordingTelemetry(calls),
         sparse_index=RecordingSparseIndex(calls),
+        indexing_policy=hybrid_indexing_policy(),
         clock=StepClock(),
     )
 
     with pytest.raises(IntegrityError, match="chunk ID"):
-        service.run(IndexingRequest("memory://fixture", manifest()))
+        policy = hybrid_indexing_policy()
+        service.run(
+            IndexingRequest(
+                "memory://fixture",
+                manifest(policy),
+                indexing_policy=policy,
+            )
+        )
 
     assert "embed_documents" not in calls
     assert "upsert" not in calls

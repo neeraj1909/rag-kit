@@ -393,6 +393,37 @@ def test_component_and_index_manifests_fingerprint_behavior_affecting_values() -
     assert error.value.differences == differences
 
 
+def test_index_manifest_serializes_indexing_identity_and_reads_legacy_values() -> None:
+    legacy = IndexManifest(
+        schema_version=1,
+        corpus_fingerprint=ComponentFingerprint.create("corpus", "legacy", {"version": 1}),
+        chunker_fingerprint=ComponentFingerprint.create("chunker", "legacy", {"version": 1}),
+        embedder_fingerprint=ComponentFingerprint.create("embedder", "legacy", {"version": 1}),
+        embedding_dimension=8,
+        normalization=NormalizationMode.L2,
+        domain_schema_fingerprint=ComponentFingerprint.create("schema", "legacy", {"version": 1}),
+    )
+    legacy_payload = legacy.to_dict()
+    legacy_payload.pop("indexing_fingerprint")
+    restored = IndexManifest.from_dict(legacy_payload)
+    assert restored == legacy
+    assert restored.to_dict()["indexing_fingerprint"] == str(restored.indexing_fingerprint)
+
+    changed = replace(
+        restored,
+        indexing_fingerprint=ComponentFingerprint.create(
+            "indexing_policy", "dense", {"vector_database": "qdrant"}
+        ),
+    )
+    assert compare_manifests(restored, changed) == {
+        "indexing_fingerprint": (
+            restored.indexing_fingerprint,
+            changed.indexing_fingerprint,
+        )
+    }
+    assert restored.fingerprint != changed.fingerprint
+
+
 def test_typed_errors_keep_safe_context_and_original_cause() -> None:
     cause = OSError("offline")
     error = UnsupportedCapabilityError(
