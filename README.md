@@ -1,19 +1,41 @@
 # rag-kit
 
+`rag-kit` is a typed, modular foundation for building retrieval-augmented
+generation (RAG) systems. It can ingest five document families, choose a
+document-aware chunking policy, build dense, sparse, or hybrid indexes, retrieve
+and optionally rerank evidence, generate a cited answer, and evaluate the result.
+
+The default path is dependency-free, local, deterministic, and small enough for
+a take-home assignment. Optional adapters add OCR, layout parsing, local models,
+HTTP delivery, hosted generation, and several vector databases without moving
+provider types into the application core.
+
 ## Purpose and non-goals
 
-`rag-kit` is a typed Python foundation for building retrieval-augmented systems
-over text, OCR, layout-aware files, images, and time-based media while keeping
-every derived result linked to its original evidence. Its dependency-free
-reference profile is small enough to run locally and its ports let an assignment
-replace one capability without moving provider types into the application core.
+The project is designed for engineers who need a credible RAG starting point but
+still want to show their own architecture and product decisions. Its central
+contract is **evidence preservation**: every searchable chunk and answer citation
+retains the original asset identity and an exact text span, page/box, table cell,
+timestamp, or keyframe locator.
 
-This is a pre-alpha toolkit, not a hosted service, an autonomous ingestion
-platform, or a promise that every modality has equal retrieval quality. It does
-not download model weights implicitly, treat OCR/model output as certain, hide
-unsupported input behind a text fallback, or make the process-local `memory`
-store durable. The `sqlite` profile is the explicit persistent option. Hosted
-generation is optional and no paid live-provider result is claimed.
+What is included:
+
+- text, OCR, layout, vision, and audio/video ingestion;
+- 20 concrete chunking strategies with an explicit family compatibility matrix;
+- dense, BM25 sparse, and reciprocal-rank-fused hybrid indexing/retrieval;
+- exact, HNSW, IVF-flat, and provider-managed physical index selections where
+  the selected database supports them;
+- memory, SQLite, pgvector, Qdrant, Pinecone, and OpenSearch vector stores;
+- optional local cross-encoder reranking and optional OpenAI generation;
+- Python library, CLI, dependency-light ASGI, and hardened Docker Compose paths;
+- deterministic IDs, immutable index manifests, typed errors, evaluation
+  reports, benchmarks, and redacted request-correlated telemetry.
+
+This remains a pre-alpha toolkit, not a managed ingestion service or a claim of
+production-scale quality. It does not download model weights implicitly, hide an
+unsupported modality behind a text fallback, treat OCR/model output as certain,
+or make the process-local `memory` store durable. Provider mocks do not prove a
+remote service, and no paid live-provider result is claimed.
 
 ## Offline quickstart
 
@@ -51,9 +73,176 @@ query  -> embed/search or BM25 -> optional fusion -> rerank -> context -> genera
 ```
 
 The application services own the sequence; adapters own filesystem, model,
-database, subprocess, and provider I/O. Derived OCR text, cells, image
-descriptions, transcript spans, and keyframes remain attached to the original
-asset and an exact typed locator.
+database, subprocess, and provider I/O. These choices are independent:
+
+| Decision | Examples | Meaning |
+|---|---|---|
+| Document family | text, OCR, layout, vision, media | What evidence is extracted and how it is cited |
+| Chunking strategy | paragraph, legal, table, image region, scene | Where evidence boundaries are placed |
+| Logical indexing | dense, sparse, hybrid | Which searchable projections are materialized |
+| Physical index | exact, HNSW, IVF-flat, managed | How a vector backend searches candidates |
+| Vector database | memory, SQLite, pgvector, Qdrant, Pinecone, OpenSearch | Where vectors and manifests live |
+| Retrieval | dense, BM25, hybrid RRF | How candidates are selected |
+| Reranking | no-op, local cross-encoder | How retrieved candidates are rescored |
+| Generation | extractive, hosted OpenAI | How authorized evidence becomes an answer |
+
+A vector database is not a chunking or indexing strategy, and a cross-encoder is
+a post-retrieval reranker rather than another retrieval system.
+
+## Document families and provenance
+
+All five families normalize into the same immutable `Document`, `Chunk`, and
+`ScoredChunk` contracts. That is why any family can use dense, sparse, or hybrid
+indexing and any configured vector store.
+
+| Family | Reference inputs | Searchable evidence | Preserved locator and confidence |
+|---|---|---|---|
+| Text | TXT, Markdown, HTML, email, code-like UTF text | decoded text and structural paths | exact `TextSpanLocator` |
+| OCR | PNG, JPEG, TIFF, BMP, WebP, scanned PDF | printed/form/handwriting-best-effort OCR | page/`BoxLocator`, token confidence, degradation notices |
+| Layout | native PDF, PPTX, XLSX/XLSM | ordered regions, tables, headers, merged cells, formulas | page/box/slide/sheet/`CellLocator` and relations |
+| Vision | PNG, JPEG, WebP, mixed image+OCR pages | model-derived descriptions and image regions | original asset plus region/page locator; no invented confidence |
+| Media | WAV, FLAC, MP3, M4A/MP4 audio, MP4/WebM video | transcript segments, scenes, midpoint keyframes | `[start_ms,end_ms)`, `KeyframeLocator`, and scene links |
+
+The committed [five-family report](reports/evaluation/five-family-execution-v1.json)
+contains one bounded passing extraction, retrieval, citation, and locator case per
+family. This is representative fixture evidence—not a claim of general OCR,
+vision, ASR, or retrieval accuracy. Detailed limits and fallback behavior are in
+[modality support](docs/modality-support.md).
+
+## Chunking strategies
+
+Choose a strategy with `settings.chunking_strategy` in TOML or
+`--chunking-strategy` on `index`, `ask`, or `evaluate`. `auto` resolves to
+`recursive` for text and conservative atomic `evidence` chunks for other
+families. The resolved policy and its bounds are fingerprinted into the index
+manifest, so changing them requires a compatible re-index.
+
+| Group | Strategies | Good fit |
+|---|---|---|
+| General text | `fixed`, `sliding_window`, `recursive`, `sentence`, `paragraph` | prose, logs, articles |
+| Structured prose | `section`, `hierarchical`, `semantic`, `proposition` | manuals, topic-oriented reports, factual statements |
+| Domain-aware | `book`, `legal`, `medical`, `code`, `conversation` | chapters, clauses, clinical sections, declarations, speaker turns |
+| Structured/multimodal | `table`, `layout_region`, `image_region`, `transcript_segment`, `scene`, `evidence` | rows/cells, page regions, image regions, timed media, atomic evidence |
+
+The `semantic` strategy is deterministic lexical segmentation, not an embedding
+model. Domain-aware strategies are rule-based. Non-character-addressable cells,
+regions, or media evidence stay atomic when splitting would invent provenance,
+even if that means exceeding a character target. Unsupported family/strategy
+pairs fail explicitly; the complete matrix is in
+[Chunking strategies](docs/chunking-strategies.md).
+
+Example:
+
+```bash
+uv run ragkit index --config configs/offline.toml \
+  --source tests/fixtures/corpus --chunking-strategy paragraph
+```
+
+## Indexing, retrieval, and reranking
+
+| Logical strategy | Index work | Retrieval behavior |
+|---|---|---|
+| `dense` | embed chunks and write the selected vector store | query embedding plus vector similarity/distance |
+| `sparse` | build BM25 only; no embedder/model or vector-store work | lexical BM25 |
+| `hybrid` | preflight and build both dense and sparse indexes | deterministic reciprocal-rank fusion over ranks, not mixed raw scores |
+
+All three strategies work with text, OCR, layout, vision, and media after those
+families become provenance-complete chunks. Retrieval returns finite,
+higher-is-better relevance with stable chunk-ID tie-breaking while retaining the
+provider's raw score kind, metric, and conversion.
+
+The optional [`LocalCrossEncoderReranker`](src/ragkit/adapters/cross_encoder_reranker.py)
+can rescore candidates from any retrieval mode. It uses a revision-pinned local
+model, bounded candidates/batches/sequence length, CPU inference, and no implicit
+download. The default `noop` reranker preserves the original ranking.
+
+Select the logical and physical path independently:
+
+```bash
+uv run ragkit ask --config configs/offline.toml \
+  --indexing-strategy hybrid --vector-database sqlite \
+  "What is the fixture answer?"
+```
+
+The request policy must match the composed policy and immutable manifest before
+source acquisition or index mutation. Full semantics are in
+[Indexing and vector-database strategies](docs/indexing-strategies.md).
+
+## Vector databases
+
+Every database implements the same modality-neutral `VectorStore` port. A
+database selector changes composition; it does not create a separate OCR,
+vision, or media implementation.
+
+| Selector | Physical index | Persistence/evidence boundary | Setup |
+|---|---|---|---|
+| `memory` | exact | process-local; shared contract tests | core, no setup |
+| `sqlite` | exact | local persistent file; reopen/query/delete integration | core, configure path/collection |
+| `pgvector` | exact, HNSW, IVF-flat | adapter and SQL behavior tested; service/restart not claimed | `pgvector` extra; operator-provisioned PostgreSQL/extension/schema |
+| `qdrant` | HNSW | adapter plus real local-SDK test; remote service opt-in | `qdrant` extra; URL and optional API-key env |
+| `pinecone` | managed | injected-client tests; paid live smoke opt-in | `pinecone` extra; pre-provisioned index/manifest sentinel |
+| `opensearch` | HNSW | injected-client tests; service test opt-in | `opensearch` extra; local/hosted endpoint and index |
+
+Stores reject incompatible manifests before search or mutation, preserve full
+chunk/provenance round trips, make stable-ID upserts idempotent, translate only
+filters they can represent exactly, and keep native score provenance. ANN
+backends do not promise exact top-k membership. Provider-specific installation,
+provisioning, consistency, and test boundaries are in the linked profiles and
+recipes below.
+
+## Ways to use rag-kit
+
+| Surface | What it provides | Starting point |
+|---|---|---|
+| Python library | compose an `OfflineRuntime` or inject ports into `IndexingService`, `AnsweringService`, and `RagPipeline` | [`examples/minimal_offline.py`](examples/minimal_offline.py) |
+| CLI | `inspect-config`, `index`, `ask`, `evaluate`; strategy/database overrides are resolved before composition | `uv run ragkit --help` |
+| HTTP/ASGI | `/healthz`, `/readyz`, `/v1/index`, `/v1/ask`; exact JSON schemas, 16 KiB body bound, request IDs, configured-source confinement | [HTTP and observability](docs/observability.md) |
+| Docker Compose | non-root, read-only-root, loopback-bound HTTP service with SQLite named-volume persistence | [Container deployment](docs/deployment.md) |
+
+`ask` intentionally indexes and queries in one process, which is convenient for
+the default memory profile. The HTTP API separates `/v1/index` and `/v1/ask`.
+HTTP requests may echo only the strategy/database already selected by the
+profile; callers cannot instantiate arbitrary providers or read arbitrary host
+paths.
+
+## Configuration and optional capabilities
+
+Profiles are strict TOML with four readable groups:
+
+- `[profile]`: name, document family, and source;
+- `[components]`: connector through telemetry adapter selections;
+- `[limits]`: asset, byte, document, part, chunk, context, output, and ranking
+  bounds;
+- `[settings]`: chunking/indexing policy, model revisions, store settings,
+  provider timeouts, and credential environment-variable names.
+
+Run this before doing expensive work:
+
+```bash
+uv run ragkit inspect-config --config configs/offline.toml
+```
+
+Inspection reports resolved strategies, fingerprints, installed extras,
+binaries, cached models, and credential **presence** without reading secret
+values or contacting a provider. Core import has no optional dependency,
+network, credential, model, database, or GPU requirement.
+
+| Extra | Adds |
+|---|---|
+| `text`, `persistent` | named zero-dependency capabilities; text baseline and SQLite persistence |
+| `ocr` | Pillow, PDF rasterization, pytesseract; Tesseract/tessdata remain system requirements |
+| `layout` | PDF, PowerPoint, and Excel parsers |
+| `vision` | Pillow, Torch/Torchvision, Transformers for pinned local vision/text models |
+| `media` | faster-whisper and SceneDetect |
+| `reranking` | Torch/Transformers cross-encoder |
+| `hosted` | OpenAI generation adapter |
+| `http` | Uvicorn server launcher |
+| `pgvector`, `qdrant`, `pinecone`, `opensearch` | one optional vector-store SDK boundary each |
+
+Local model adapters use provisioned, exact revisions and `local_files_only`;
+normal tests deny sockets and never download weights. Hosted credential values
+are resolved only during composition and never enter manifests, fingerprints,
+telemetry, serialization, or error chains.
 
 ## Choose a profile
 
@@ -67,37 +256,62 @@ limits, degraded modes, and fingerprints without reading secret values.
 | [`sparse`](configs/sparse.toml) | Exact-term text retrieval | Core only; manifest-bound BM25 in process-local memory | Fixed text quality thresholds pass |
 | [`hybrid`](configs/hybrid.toml) | Dense plus lexical text retrieval | Core only; bounded rank-only reciprocal-rank fusion | Fixed text quality thresholds pass; fusion scores are not probabilities |
 | [`reranked`](configs/reranked.toml) | Local cross-encoder reranking | `reranking` extra and exact cached revision; CPU reference path, no implicit download | Pinned offline integration passes |
-| [`ocr`](configs/ocr.toml) | Printed scans and bounded scanned PDFs | `ocr` extra plus Tesseract and language data; process-local memory | Extraction/retrieval/box locator pass; citation coverage currently fails |
-| [`layout`](configs/layout.toml) | PDF, PPTX, XLSX, and XLSM structure | `layout` extra; parser selected by suffix; process-local memory | Extraction passes; business-query retrieval, cell locator, and citation currently fail |
-| [`vision`](configs/vision.toml) | Image-derived descriptions with region evidence | `vision` extra and exact cached SmolVLM revision; CPU/local-files-only | Bounded quality runner is ineligible on its resource policy; no quality pass is claimed |
+| [`ocr`](configs/ocr.toml) | Printed scans and bounded scanned PDFs | `ocr` extra plus Tesseract and language data; process-local memory | Bounded extraction/retrieval/citation/box-locator case passes |
+| [`layout`](configs/layout.toml) | PDF, PPTX, XLSX, and XLSM structure | `layout` extra; parser selected by suffix; process-local memory | Bounded extraction/retrieval/citation/cell-linkage case passes |
+| [`vision`](configs/vision.toml) | Image-derived descriptions with region evidence | `vision` extra and exact cached SmolVLM revision; CPU/local-files-only | Bounded region-linked model case passes; general visual accuracy is not claimed |
 | [`mixed-image`](configs/mixed-image.toml) | OCR and vision over the same raster page | `ocr` and `vision` extras, Tesseract, cached SmolVLM | Both extractors are required; neither silently substitutes for the other |
-| [`media`](configs/media.toml) | Timestamped audio/video evidence | `media` extra and exact cached faster-whisper revision | Audio timestamp case passes; video scene/keyframe quality remains partial |
+| [`media`](configs/media.toml) | Timestamped audio/video evidence | `media` extra and exact cached faster-whisper revision | Bounded transcript/timestamp case passes; linked video keyframe citation has separate e2e proof |
 | [`torch-local`](configs/torch-local.toml) | Pinned local text embeddings | `vision` extra supplies Torch/Transformers; exact cached MiniLM revision | CPU repeatability integration passes |
 | [`persistent`](configs/persistent.toml) | A store that survives process exit | Standard-library SQLite database at the configured path | Reopen/query/delete and incompatible-manifest rejection pass |
 | [`hosted`](configs/hosted.toml) | Optional OpenAI generation | `hosted` extra and `OPENAI_API_KEY`; network call is explicit | Mocked secret/error behavior passes; no paid live smoke is claimed |
+| [`pgvector`](configs/pgvector.toml) | PostgreSQL vector storage | `pgvector` extra and DSN env; exact/HNSW/IVF-flat selection | Adapter/SQL proof only; operator service evidence remains required |
+| [`qdrant`](configs/qdrant.toml) | Qdrant vector service | `qdrant` extra; HNSW | Real local-SDK contract passes; remote persistence is opt-in |
+| [`pinecone`](configs/pinecone.toml) | Managed Pinecone vector index | `pinecone` extra, host/key env, pre-provisioned sentinel | Injected-client proof; paid live test is opt-in |
+| [`opensearch`](configs/opensearch.toml) | OpenSearch vector search | `opensearch` extra; HNSW | Injected-client proof; service test is opt-in |
 
-The family boundary is narrower than the set of file extensions a third-party
-library might accept:
+Each profile is a reviewed example, not the only valid combination. Copy one,
+then change family, chunking, logical indexing, physical index, vector database,
+reranker, generator, and limits as independent choices. Invalid combinations
+fail during profile loading or composition rather than silently falling back.
 
-| Family | Accepted reference inputs; profile/extra | Searchable evidence and locator | Confidence/fallback policy | Fixture, business path, and proof |
-|---|---|---|---|---|
-| Text | TXT, Markdown, HTML, email, and code-like UTF text; [`offline`](configs/offline.toml) / core (`text` adds no dependency) | Decoded text with `TextSpanLocator` and structural path | Confidence does not apply; ambiguous encoding and malformed MIME fail or emit a notice rather than guessing | [Corpus](tests/fixtures/corpus), [knowledge-base recipe](docs/recipes/knowledge-base-text.md), `unit`/`contract`/`e2e` |
-| OCR | PNG, JPEG, TIFF, BMP, WebP, bounded scanned PDF; [`ocr`](configs/ocr.toml) / `ocr` | OCR words/lines with page plus `BoxLocator` | Raw Tesseract confidence stays visible; handwriting is best-effort, missing engines/languages fail, and there is no native-text fallback | [OCR fixtures](tests/fixtures/ocr), [claims recipe](docs/recipes/claims-ocr.md), `modality_integration` |
-| Layout | Machine-generated PDF, PPTX, XLSX/XLSM; [`layout`](configs/layout.toml) / `layout` | Ordered regions, cells, headers, merged-cell/formula relations with page, box, slide/sheet, or `CellLocator` | Ambiguous reading order emits notices; scanned pages and embedded images require explicit OCR/vision routing | [Layout fixtures](tests/fixtures/layout), [financial recipe](docs/recipes/financial-layout.md), `modality_integration` |
-| Vision | PNG, JPEG, WebP; [`vision`](configs/vision.toml) / `vision` | Model-derived descriptions retain the original asset and image region | Factual confidence is unavailable; output is untrusted derived evidence and never falls back to OCR or filename text | [Vision fixture](tests/fixtures/vision), [equipment recipe](docs/recipes/equipment-vision.md), opt-in model `integration` |
-| Media | WAV, FLAC, MP3, M4A/MP4 audio, short MP4/WebM video; [`media`](configs/media.toml) / `media` | Transcript spans use `[start_ms,end_ms)`; scenes retain `KeyframeLocator` links | Speaker identity and ASR confidence are unavailable; an unprocessed video stream cannot be hidden as transcript-only success | [Media fixtures](tests/fixtures/media), [support recipe](docs/recipes/support-media.md), `modality_integration` |
+## Evaluation, benchmarks, and observability
 
-The five-family report is deliberately segmented: a passing text or audio case
-cannot mask an OCR, layout, vision, or video gap. See the
-[evaluation runner](docs/evaluation-runner.md) and the
-[committed requirement evidence](reports/evaluation/requirements-evidence-v1.json)
-before making capability claims.
+The evaluation package uses versioned, strict JSON schemas and records dataset,
+corpus, configuration, component, software, and model provenance. It reports
+per-case and per-family retrieval recall/hit/reciprocal rank, citation precision
+and coverage, extraction coverage, and locator validity. Missing or ineligible
+evidence stays explicit and cannot become a decorative pass.
 
-Canonical retrieval relevance is finite and higher-is-better, with stable chunk
-ID tie-breaking. Native dense similarity, distance, BM25, fusion, and
-cross-encoder values retain their kind and are not cross-stage calibrated.
-Index manifests bind corpus, chunker, embedder, vector dimension,
-normalization, and schema; mismatch fails before search or mutation.
+`scripts/benchmark.py` adds warmups, repetitions, p50/p95 latency, throughput,
+and a clearly named cumulative child-process memory scope. Latency is
+informational unless an explicit gate is configured. Committed reports live in
+[`reports/evaluation`](reports/evaluation) and [`reports/benchmarks`](reports/benchmarks).
+
+`InMemoryTelemetry` supports tests and embedding applications;
+`JsonLinesTelemetry` supports operations. HTTP mode correlates every nested
+index/answer stage with the request ID and emits only bounded scalar metadata:
+duration, outcome, component fingerprint, count, and stable error category. It
+does not emit queries, source URIs, document text, prompts, answers, exception
+messages, credentials, or token values.
+
+## Start a take-home assignment
+
+Two reviewed templates provide a small starting boundary without copying the
+whole toolkit. Preview exactly what would be created:
+
+```bash
+uv run python scripts/bootstrap_assignment.py --template local-offline \
+  --destination ./my-rag-assignment --dry-run
+```
+
+Then remove `--dry-run` to copy either the
+[local/offline](examples/assignment_profiles/local-offline) or
+[hosted/persistent](examples/assignment_profiles/hosted-persistent) template.
+The helper preflights both managed files, refuses collisions by default, rejects
+links and non-regular targets, and uses staged in-process rollback for failures.
+`--overwrite` is an explicit boundary and does not make abrupt process or
+filesystem failure crash-atomic. Customize the generated profile before
+changing toolkit internals.
 
 ## Extension map
 
@@ -116,21 +330,7 @@ selection or SDK types in `domain`, `ports`, or `application`.
 | Reranking | [`Reranker`](src/ragkit/ports/interfaces.py) | [`NoOpReranker`](src/ragkit/adapters/retrieval.py), [`LocalCrossEncoderReranker`](src/ragkit/adapters/cross_encoder_reranker.py) | [Bootstrap](src/ragkit/infrastructure/bootstrap.py), `components.reranker` | [Reranker integration](tests/integration/test_cross_encoder_reranker_integration.py) |
 | Prompt/generation | [`PromptBuilder`](src/ragkit/ports/interfaces.py), [`Generator`](src/ragkit/ports/interfaces.py) | [`TemplatePromptBuilder`](src/ragkit/adapters/generation.py), [`ExtractiveGenerator`](src/ragkit/adapters/generation.py), [`OpenAIHostedGenerator`](src/ragkit/adapters/hosted.py) | [Bootstrap](src/ragkit/infrastructure/bootstrap.py), `components.prompt_builder`, `components.generator` | [Application orchestration](tests/unit/application/test_orchestration.py) |
 | Evaluation | [`Evaluator`](src/ragkit/ports/interfaces.py) | [`DeterministicEvaluator`](src/ragkit/adapters/generation.py) | [Evaluation package](src/ragkit/evaluation), `components.evaluator` | [Hand-calculated metrics](tests/unit/evaluation/test_evaluation.py) |
-| Telemetry | [`Telemetry`](src/ragkit/ports/interfaces.py) | [`InMemoryTelemetry`](src/ragkit/adapters/observability.py) | [Bootstrap](src/ragkit/infrastructure/bootstrap.py), `components.telemetry` | [Application orchestration](tests/unit/application/test_orchestration.py) |
-
-For a new assignment, inspect a reviewed template without writing files:
-
-```bash
-uv run python scripts/bootstrap_assignment.py --template local-offline \
-  --destination ./my-rag-assignment --dry-run
-```
-
-Then remove `--dry-run` to copy the
-[local/offline](examples/assignment_profiles/local-offline) or
-[hosted/persistent](examples/assignment_profiles/hosted-persistent) template.
-The helper refuses collisions by default; `--overwrite` is a separate explicit
-choice and replaces only changed managed files after preflight. Customize the
-generated profile before changing toolkit internals.
+| Telemetry | [`Telemetry`](src/ragkit/ports/interfaces.py) | [`InMemoryTelemetry`](src/ragkit/adapters/observability.py), [`JsonLinesTelemetry`](src/ragkit/adapters/observability.py) | [Bootstrap](src/ragkit/infrastructure/bootstrap.py), `components.telemetry` | [Observability tests](tests/unit/adapters/test_observability.py) |
 
 The stable IDs, immutable records, locators, error taxonomy, ordering,
 determinism, side effects, and optional-dependency rules are authoritative in
@@ -182,8 +382,12 @@ active edits, is in [CONTRIBUTING.md](CONTRIBUTING.md).
 - [Offline adapter behavior](docs/offline-adapters.md)
 - [Five-family support, limits, confidence, and fallback policy](docs/modality-support.md)
 - [Production adapters and provisioning](docs/production-adapters.md)
+- [HTTP schemas, correlation, and redaction](docs/observability.md)
+- [Container deployment and persistence](docs/deployment.md)
+- [Packaging and optional-extra evidence](docs/release-packaging.md)
 - [Evaluation schema, metrics, and benchmark contract](docs/evaluation.md)
 - [Executable Phase 4 evaluation runner](docs/evaluation-runner.md)
 - Business paths: [knowledge-base text](docs/recipes/knowledge-base-text.md), [claims OCR](docs/recipes/claims-ocr.md), [financial layout](docs/recipes/financial-layout.md), [equipment vision](docs/recipes/equipment-vision.md), [support media](docs/recipes/support-media.md), and [cross-encoder reranking](docs/recipes/cross-encoder-reranking.md)
+- Vector-store setup: [pgvector](docs/recipes/pgvector-indexing.md), [Qdrant](docs/recipes/qdrant-indexing.md), [Pinecone](docs/recipes/pinecone-indexing.md), and [OpenSearch](docs/recipes/opensearch-indexing.md)
 - [Architecture decisions](docs/decisions/0001-functional-core-and-sync-first-ports.md)
 - [Fixture provenance and limits](tests/fixtures/README.md)
